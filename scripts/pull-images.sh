@@ -21,6 +21,10 @@ pull_and_tag hello-world:latest  hello-world:latest
 pull_and_tag gitleaks:latest     zricethezav/gitleaks:latest
 
 echo
-echo "Готово. Проверка:"
-docker images --format '  {{.Repository}}:{{.Tag}}' | grep -E '^  (postgres|redis|python|nginx|hello-world|zricethezav/gitleaks):' || true
-docker run --rm hello-world | head -2
+echo "Проверка:"
+missing=0
+for img in postgres:17-alpine redis:7-alpine python:3.12-slim nginx:1.27-alpine hello-world:latest zricethezav/gitleaks:latest; do
+  if docker image inspect "$img" >/dev/null 2>&1; then echo "  OK   $img"; else echo "  НЕТ  $img"; missing=1; fi
+done
+docker run --rm hello-world | grep "Hello from Docker"
+[ "$missing" = 0 ] && echo "Готово: все образы на месте." || { echo "Часть образов не скачалась — запустите скрипт ещё раз."; exit 1; }
