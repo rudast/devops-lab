@@ -1,0 +1,48 @@
+# Занятие 8: PostgreSQL + Redis + Backend
+# ВНИМАНИЕ: пароли здесь захардкожены НАМЕРЕННО — на занятии 9 мы это исправим.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: app
+      POSTGRES_PASSWORD: supersecret        # плохо! исправим на занятии 9
+      POSTGRES_DB: appdb
+    volumes:
+      - pgdata:/var/lib/postgresql/data     # именованный том: данные переживут пересоздание контейнера
+    networks: [backend-net]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app -d appdb"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  cache:
+    image: redis:7-alpine
+    networks: [backend-net]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build: ../app
+    environment:
+      DATABASE_URL: postgresql://app:supersecret@db:5432/appdb   # "db" — имя сервиса = DNS-имя
+      REDIS_URL: redis://cache:6379/0
+      APP_VERSION: "lesson-08"
+    ports:
+      - "8000-8005:8000"                    # диапазон портов, чтобы работал --scale
+    networks: [backend-net]
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+
+networks:
+  backend-net:
+
+volumes:
+  pgdata:
