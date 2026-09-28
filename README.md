@@ -13,6 +13,8 @@
 
 ## Содержание
 - [Подготовка ноутбука](#подготовка-ноутбука)
+  - [Docker в Ubuntu (VirtualBox)](#docker-и-docker-compose-в-ubuntu-вм-virtualbox)
+  - [Docker на macOS](#docker-и-docker-compose-на-macos)
 - [Занятие 8. Docker Compose](#занятие-8-docker-compose)
 - [Занятие 9. Конфигурация и секреты](#занятие-9-конфигурация-и-секреты)
 - [Занятие 10. Terraform + Ansible](#занятие-10-terraform--ansible-cloudru)
@@ -36,7 +38,7 @@ lesson12/                 production compose + nginx
 
 ## Подготовка ноутбука
 
-На macOS Docker Desktop у вас уже стоит; на Windows Docker ставится внутрь виртуальной машины (ниже). Выберите свою ОС.
+Выберите свою ОС: на Windows всё ставится внутрь виртуальной машины Ubuntu (VirtualBox), на Mac — напрямую. Установка Docker расписана ниже отдельно для [Ubuntu](#docker-и-docker-compose-в-ubuntu-вм-virtualbox) и [macOS](#docker-и-docker-compose-на-macos).
 
 | Инструмент | Зачем | Занятие |
 |---|---|---|
@@ -87,13 +89,8 @@ ssh -p 2222 <ваш_пользователь>@localhost
 sudo apt update && sudo apt -y upgrade
 sudo apt install -y git curl unzip ansible pipx
 pipx ensurepath && pipx install git-filter-repo
-
-# Docker Engine + Compose (официальный скрипт Docker)
-curl -fsSL https://get.docker.com | sudo sh
-sudo usermod -aG docker $USER
-exit                                   # перелогиньтесь, чтобы заработала группа docker
 ```
-Снова подключитесь по SSH и проверьте: `docker run --rm hello-world` и `docker compose version`.
+Docker и Docker Compose — см. раздел [Docker в Ubuntu](#docker-и-docker-compose-в-ubuntu-вм-virtualbox) ниже.
 
 Terraform — см. раздел [Terraform](#terraform-для-всех) ниже (версия **linux_amd64**). SSH-ключ для GitHub создавайте **внутри ВМ**.
 
@@ -106,7 +103,81 @@ Terraform — см. раздел [Terraform](#terraform-для-всех) ниж�
 ```bash
 brew install git ansible git-filter-repo
 ```
+Docker и Docker Compose — см. раздел [Docker на macOS](#docker-и-docker-compose-на-macos) ниже.
 Terraform — см. следующий раздел (версия **darwin_arm64** для Mac на M1–M4, **darwin_amd64** для Intel).
+
+### Docker и Docker Compose в Ubuntu (ВМ VirtualBox)
+
+Ставим **Docker Engine** из официального репозитория Docker. Compose идёт плагином — команда `docker compose` (через пробел). Все команды — внутри ВМ.
+
+1. Удалите старые/неофициальные пакеты, если они есть (ошибки «not installed» — это нормально):
+   ```bash
+   for pkg in docker.io docker-doc docker-compose docker-compose-v2 podman-docker containerd runc; do
+     sudo apt-get remove -y $pkg
+   done
+   ```
+2. Подключите репозиторий Docker:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y ca-certificates curl
+   sudo install -m 0755 -d /etc/apt/keyrings
+   sudo curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+   sudo chmod a+r /etc/apt/keyrings/docker.asc
+
+   echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] \
+   https://download.docker.com/linux/ubuntu $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+     sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+   ```
+3. Установите Docker Engine, Buildx и Compose:
+   ```bash
+   sudo apt-get update
+   sudo apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+   ```
+4. Разрешите запускать docker без `sudo` и включите автозапуск:
+   ```bash
+   sudo usermod -aG docker $USER
+   sudo systemctl enable --now docker
+   exit            # выйдите из SSH и подключитесь снова — иначе группа не применится
+   ```
+5. Проверка (после повторного входа):
+   ```bash
+   docker version
+   docker compose version        # Docker Compose version v2.x или новее
+   docker run --rm hello-world   # «Hello from Docker!»
+   ```
+
+> Короткий путь для тех, кто торопится: `curl -fsSL https://get.docker.com | sudo sh` — официальный скрипт делает шаги 1–3 сам. Шаг 4 всё равно нужен.
+
+### Docker и Docker Compose на macOS
+
+На Mac ставим **Docker Desktop** — в него уже входят Docker Engine, Compose и Buildx.
+
+1. Узнайте процессор: меню Apple → «Об этом Mac». **Apple M1/M2/M3/M4** → версия *Apple Silicon*, **Intel** → версия *Intel chip*.
+2. Установите одним из способов:
+   - скачайте `.dmg` с https://docs.docker.com/desktop/setup/install/mac-install/ и перетащите Docker в «Программы»;
+   - или через Homebrew: `brew install --cask docker`
+3. Запустите **Docker** из «Программ», примите соглашение и дождитесь зелёного статуса *Engine running* (значок кита в строке меню).
+4. Рекомендуемые настройки: **Settings → Resources** — CPU 2+, Memory 4 ГБ+; **Settings → General** — включить *Start Docker Desktop when you sign in* (по желанию).
+5. Проверка в терминале:
+   ```bash
+   docker version
+   docker compose version
+   docker run --rm hello-world
+   ```
+
+> На Mac с Apple Silicon все образы курса (`postgres`, `redis`, `nginx`, `python`) есть в версии arm64 — ничего дополнительно настраивать не нужно.
+
+### Если образы не скачиваются (Docker Hub недоступен)
+
+Ошибки вида `TLS handshake timeout`, `403 Forbidden` или `toomanyrequests` при `docker pull` — проблема доступа к Docker Hub. Подключите зеркало реестра:
+
+- **Ubuntu (ВМ):**
+  ```bash
+  echo '{ "registry-mirrors": ["https://mirror.gcr.io"] }' | sudo tee /etc/docker/daemon.json
+  sudo systemctl restart docker
+  docker info | grep -A1 "Registry Mirrors"
+  ```
+- **macOS:** Docker Desktop → **Settings → Docker Engine** → добавьте в JSON строку `"registry-mirrors": ["https://mirror.gcr.io"]` → **Apply & restart**.
 
 ### Terraform (для всех)
 
@@ -302,6 +373,7 @@ for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы и
 | Windows: `localhost:8000` не открывается | Нет проброса порта в VirtualBox | Настроить → Сеть → Проброс портов |
 | `port is already allocated` | Порт занят другим контейнером | `docker ps`, остановить лишнее или сменить порт |
 | backend: `Connection refused` к БД | `localhost` вместо имени сервиса | В URL должно быть `db`, не `localhost` |
+| `pull`: TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Зеркало реестра](#если-образы-не-скачиваются-docker-hub-недоступен) |
 | `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
 | `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
 | Ansible: `UNREACHABLE` | ВМ ещё грузится / не тот пользователь / закрыт порт 22 | Подождать 1–2 мин, проверить `ansible_user` |
