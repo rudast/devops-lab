@@ -15,6 +15,7 @@
 - [Подготовка ноутбука](#подготовка-ноутбука)
   - [Docker в Ubuntu (VirtualBox)](#docker-и-docker-compose-в-ubuntu-вм-virtualbox)
   - [Docker на macOS](#docker-и-docker-compose-на-macos)
+  - [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии)
 - [Занятие 8. Docker Compose](#занятие-8-docker-compose)
 - [Занятие 9. Конфигурация и секреты](#занятие-9-конфигурация-и-секреты)
 - [Занятие 10. Terraform + Ansible](#занятие-10-terraform--ansible-cloudru)
@@ -145,8 +146,9 @@ Terraform — см. следующий раздел (версия **darwin_arm64
    docker compose version        # Docker Compose version v2.x или новее
    docker run --rm hello-world   # «Hello from Docker!»
    ```
+6. **Подключите зеркала Docker Hub** — см. раздел [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии). Без этого образы курса могут не скачаться.
 
-> Короткий путь для тех, кто торопится: `curl -fsSL https://get.docker.com | sudo sh` — официальный скрипт делает шаги 1–3 сам. Шаг 4 всё равно нужен.
+> Короткий путь для тех, кто торопится: `curl -fsSL https://get.docker.com | sudo sh` — официальный скрипт делает шаги 1–3 сам. Шаги 4 и 6 всё равно нужны.
 
 ### Docker и Docker Compose на macOS
 
@@ -164,20 +166,52 @@ Terraform — см. следующий раздел (версия **darwin_arm64
    docker compose version
    docker run --rm hello-world
    ```
+6. **Подключите зеркала Docker Hub** — см. раздел [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии).
 
 > На Mac с Apple Silicon все образы курса (`postgres`, `redis`, `nginx`, `python`) есть в версии arm64 — ничего дополнительно настраивать не нужно.
 
-### Если образы не скачиваются (Docker Hub недоступен)
+### Зеркала Docker Hub (обязательно для России)
 
-Ошибки вида `TLS handshake timeout`, `403 Forbidden` или `toomanyrequests` при `docker pull` — проблема доступа к Docker Hub. Подключите зеркало реестра:
+Docker Hub из России работает нестабильно: `docker pull` зависает на `Waiting` / `Pulling fs layer` или падает с `TLS handshake timeout`, `403`, `toomanyrequests`. Поэтому **сразу после установки Docker** подключите зеркала. Docker перебирает их по порядку и только в конце идёт в сам Docker Hub.
 
-- **Ubuntu (ВМ):**
-  ```bash
-  echo '{ "registry-mirrors": ["https://mirror.gcr.io"] }' | sudo tee /etc/docker/daemon.json
-  sudo systemctl restart docker
-  docker info | grep -A1 "Registry Mirrors"
-  ```
-- **macOS:** Docker Desktop → **Settings → Docker Engine** → добавьте в JSON строку `"registry-mirrors": ["https://mirror.gcr.io"]` → **Apply & restart**.
+| Зеркало | Кто поддерживает |
+|---|---|
+| `https://dh-mirror.gitverse.ru` | GitVerse (СберТех) |
+| `https://dockerhub.timeweb.cloud` | Timeweb Cloud |
+| `https://dockerhub1.beget.com` | Beget |
+| `https://mirror.gcr.io` | Google |
+
+**Ubuntu (ВМ):**
+```bash
+cat <<'EOF' | sudo tee /etc/docker/daemon.json
+{
+  "registry-mirrors": [
+    "https://dh-mirror.gitverse.ru",
+    "https://dockerhub.timeweb.cloud",
+    "https://dockerhub1.beget.com",
+    "https://mirror.gcr.io"
+  ],
+  "max-concurrent-downloads": 3
+}
+EOF
+sudo systemctl restart docker
+docker info | grep -A4 "Registry Mirrors"     # должны быть видны все четыре
+docker pull hello-world
+```
+
+**macOS:** Docker Desktop → **Settings → Docker Engine** → добавьте в JSON ключ `registry-mirrors` с тем же списком (остальные ключи, которые там уже есть, не удаляйте) → **Apply & restart**.
+
+**Если какой-то образ всё равно не качается** — скачайте его напрямую с зеркала и дайте привычное имя:
+```bash
+docker pull dh-mirror.gitverse.ru/library/postgres:17-alpine          # официальные образы — через library/
+docker tag  dh-mirror.gitverse.ru/library/postgres:17-alpine postgres:17-alpine
+
+docker pull dh-mirror.gitverse.ru/zricethezav/gitleaks:latest         # образы пользователей — как есть
+docker tag  dh-mirror.gitverse.ru/zricethezav/gitleaks:latest zricethezav/gitleaks:latest
+```
+Прерывайте зависший pull через **Ctrl+C**, а не Ctrl+Z (Ctrl+Z только ставит процесс на паузу). Уже скачанные слои при повторе заново не качаются.
+
+> Зеркала поддерживают сторонние компании, и любое из них может перестать работать — поэтому в списке их несколько. Если недоступны все, преподаватель раздаст образы архивом: `docker load -i images.tar`.
 
 ### Terraform (для всех)
 
@@ -373,7 +407,7 @@ for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы и
 | Windows: `localhost:8000` не открывается | Нет проброса порта в VirtualBox | Настроить → Сеть → Проброс портов |
 | `port is already allocated` | Порт занят другим контейнером | `docker ps`, остановить лишнее или сменить порт |
 | backend: `Connection refused` к БД | `localhost` вместо имени сервиса | В URL должно быть `db`, не `localhost` |
-| `pull`: TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Зеркало реестра](#если-образы-не-скачиваются-docker-hub-недоступен) |
+| `pull` висит на `Waiting` / TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии) |
 | `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
 | `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
 | Ansible: `UNREACHABLE` | ВМ ещё грузится / не тот пользователь / закрыт порт 22 | Подождать 1–2 мин, проверить `ansible_user` |
