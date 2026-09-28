@@ -1,0 +1,143 @@
+# Занятия 11–12: CI/CD-пайплайн учебного сервиса.
+#   PR в main      -> lint + test
+#   push в main    -> lint + test -> build & push образа в GHCR -> deploy (если включён)
+name: ci-cd
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:        # ручной запуск кнопкой в GitHub
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  # ---------- CI: проверяем код ----------
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: app/requirements-dev.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements-dev.txt
+
+      - name: Lint (ruff)
+        run: ruff check .
+
+      - name: Unit tests (pytest)
+        run: pytest -v
+
+  # ---------- CI: собираем и публикуем артефакт (образ) ----------
+  build:
+    needs: test
+    if: github.event_name != 'pull_request'     # на PR образ не пушим
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write                           # право пушить в GHCR
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: docker/setup-buildx-action@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image tags
+        id: meta
+        uses: docker/metadata-action@v6
+        with:
+          images: ${{ env.REGISTRY }}/${{ github.repository }}/backend
+          tags: |
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push
+        uses: docker/build-push-action@v7
+        with:
+          context: app
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # ---------- CD: доставка на сервер (занятие 12) ----------
+  # Включается переменной репозитория DEPLOY_ENABLED=true
+  # (Settings -> Secrets and variables -> Actions -> Variables).
+  deploy:
+    needs: build
+    if: github.ref == 'refs/heads/main' && vars.DEPLOY_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: read
+      packages: read
+    env:
+      SSH_HOST: ${{ secrets.SSH_HOST }}
+      SSH_USER: ${{ secrets.SSH_USER }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Configure SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "$SSH_HOST" >> ~/.ssh/known_hosts
+
+      - name: Compute image name
+        run: |
+          # имена образов в GHCR должны быть в нижнем регистре
+          repo="${GITHUB_REPOSITORY,,}"
+          echo "IMAGE=${REGISTRY}/${repo}/backend:sha-${GITHUB_SHA::7}" >> "$GITHUB_ENV"
+
+      - name: Upload compose file and nginx config
+        run: |
+          scp lesson12/docker-compose.prod.yml "$SSH_USER@$SSH_HOST:/opt/app/docker-compose.yml"
+          scp -r lesson12/nginx "$SSH_USER@$SSH_HOST:/opt/app/"
+
+      - name: Write .env on server from GitHub Secrets
+        run: |
+          ssh "$SSH_USER@$SSH_HOST" "umask 077 && cat > /opt/app/.env" <<EOF
+          POSTGRES_USER=${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB=appdb
+          BACKEND_IMAGE=${IMAGE}
+          APP_VERSION=sha-${GITHUB_SHA::7}
+          EOF
+
+      - name: Pull new image and restart
+        run: |
+          ssh "$SSH_USER@$SSH_HOST" bash -s <<EOF
+          set -euo pipefail
+          cd /opt/app
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker compose pull backend
+          docker compose up -d --remove-orphans
+          docker logout ghcr.io
+          docker image prune -f
+          EOF
+
+      - name: Smoke test
+        run: |
+          for i in $(seq 1 10); do
+            if curl -fsS "http://$SSH_HOST/health"; then echo; echo "Deploy OK"; exit 0; fi
+            echo "waiting... ($i)"; sleep 5
+          done
+          echo "Service is not healthy"; exit 1
