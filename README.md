@@ -436,6 +436,7 @@ for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы и
 | `port is already allocated` | Порт занят другим контейнером | `docker ps`, остановить лишнее или сменить порт |
 | backend: `Connection refused` к БД | `localhost` вместо имени сервиса | В URL должно быть `db`, не `localhost` |
 | `pull` висит на `Waiting` / TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Образы из GHCR](#образы-курса-из-нашего-реестра-ghcr) или [зеркала](#зеркала-docker-hub-запасной-вариант) |
+| `pull` висит на `Waiting` на всех слоях сразу, даже после перезапуска | Остались процессы `docker pull`, остановленные через Ctrl+Z, и недокачанные куски | `pkill -9 -f "docker pull"`; `sudo systemctl stop docker docker.socket containerd`; `sudo rm -rf /var/lib/containerd/io.containerd.content.v1.content/ingest/*`; `sudo systemctl start containerd docker` |
 | `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
 | `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
 | Ansible: `UNREACHABLE` | ВМ ещё грузится / не тот пользователь / закрыт порт 22 | Подождать 1–2 мин, проверить `ansible_user` |
