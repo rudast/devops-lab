@@ -15,7 +15,8 @@
 - [Подготовка ноутбука](#подготовка-ноутбука)
   - [Docker в Ubuntu (VirtualBox)](#docker-и-docker-compose-в-ubuntu-вм-virtualbox)
   - [Docker на macOS](#docker-и-docker-compose-на-macos)
-  - [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии)
+  - [Образы курса из GHCR](#образы-курса-из-нашего-реестра-ghcr)
+  - [Зеркала Docker Hub (запасной вариант)](#зеркала-docker-hub-запасной-вариант)
 - [Занятие 8. Docker Compose](#занятие-8-docker-compose)
 - [Занятие 9. Конфигурация и секреты](#занятие-9-конфигурация-и-секреты)
 - [Занятие 10. Terraform + Ansible](#занятие-10-terraform--ansible-cloudru)
@@ -32,7 +33,8 @@ lesson09/                 тот же compose, но конфигурация в 
 lesson10/terraform/       ВМ + сеть в cloud.ru (провайдер sbercloud)
 lesson10/ansible/         установка Docker на ВМ
 lesson12/                 production compose + nginx
-.github/workflows/        CI/CD-пайплайн (занятия 11–12)
+.github/workflows/        CI/CD-пайплайн (занятия 11–12) и копирование образов в GHCR
+scripts/pull-images.sh    скачать образы курса из GHCR
 ```
 
 ---
@@ -146,7 +148,7 @@ Terraform — см. следующий раздел (версия **darwin_arm64
    docker compose version        # Docker Compose version v2.x или новее
    docker run --rm hello-world   # «Hello from Docker!»
    ```
-6. **Подключите зеркала Docker Hub** — см. раздел [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии). Без этого образы курса могут не скачаться.
+6. **Скачайте образы курса из нашего реестра** — см. раздел [Образы курса из GHCR](#образы-курса-из-нашего-реестра-ghcr). Docker Hub из России работает нестабильно.
 
 > Короткий путь для тех, кто торопится: `curl -fsSL https://get.docker.com | sudo sh` — официальный скрипт делает шаги 1–3 сам. Шаги 4 и 6 всё равно нужны.
 
@@ -166,13 +168,42 @@ Terraform — см. следующий раздел (версия **darwin_arm64
    docker compose version
    docker run --rm hello-world
    ```
-6. **Подключите зеркала Docker Hub** — см. раздел [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии).
+6. **Скачайте образы курса из нашего реестра** — см. раздел [Образы курса из GHCR](#образы-курса-из-нашего-реестра-ghcr).
 
 > На Mac с Apple Silicon все образы курса (`postgres`, `redis`, `nginx`, `python`) есть в версии arm64 — ничего дополнительно настраивать не нужно.
 
-### Зеркала Docker Hub (обязательно для России)
+### Образы курса из нашего реестра (GHCR)
 
-Docker Hub из России работает нестабильно: `docker pull` зависает на `Waiting` / `Pulling fs layer` или падает с `TLS handshake timeout`, `403`, `toomanyrequests`. Поэтому **сразу после установки Docker** подключите зеркала. Docker перебирает их по порядку и только в конце идёт в сам Docker Hub.
+Docker Hub из России работает нестабильно, поэтому все базовые образы курса скопированы в **GitHub Container Registry** этого репозитория (`ghcr.io/tenroman1-design/devops-lab/...`). Их обновляет workflow `mirror-images` раз в месяц; образы собраны для amd64 (ВМ) и arm64 (Mac на M1–M4).
+
+| Привычное имя | Копия в нашем реестре |
+|---|---|
+| `postgres:17-alpine` | `ghcr.io/tenroman1-design/devops-lab/postgres:17-alpine` |
+| `redis:7-alpine` | `ghcr.io/tenroman1-design/devops-lab/redis:7-alpine` |
+| `python:3.12-slim` | `ghcr.io/tenroman1-design/devops-lab/python:3.12-slim` |
+| `nginx:1.27-alpine` | `ghcr.io/tenroman1-design/devops-lab/nginx:1.27-alpine` |
+| `hello-world:latest` | `ghcr.io/tenroman1-design/devops-lab/hello-world:latest` |
+| `zricethezav/gitleaks:latest` | `ghcr.io/tenroman1-design/devops-lab/gitleaks:latest` |
+
+**Скачать всё одной командой** — скрипт скачает образы из GHCR и даст им привычные имена, поэтому `docker-compose.yml` и `Dockerfile` работают без изменений:
+```bash
+git clone https://github.com/tenroman1-design/devops-lab.git && cd devops-lab
+bash scripts/pull-images.sh
+```
+Без клонирования репозитория:
+```bash
+curl -fsSL https://raw.githubusercontent.com/tenroman1-design/devops-lab/main/scripts/pull-images.sh | bash
+```
+Вручную, для одного образа:
+```bash
+docker pull ghcr.io/tenroman1-design/devops-lab/postgres:17-alpine
+docker tag  ghcr.io/tenroman1-design/devops-lab/postgres:17-alpine postgres:17-alpine
+```
+Логин в GHCR не нужен — пакеты публичные.
+
+### Зеркала Docker Hub (запасной вариант)
+
+Если нужен образ, которого нет в нашем реестре, а `docker pull` зависает на `Waiting` / `Pulling fs layer` или падает с `TLS handshake timeout`, `403`, `toomanyrequests` — подключите зеркала Docker Hub. Docker перебирает их по порядку и только в конце идёт в сам Docker Hub.
 
 | Зеркало | Кто поддерживает |
 |---|---|
@@ -250,13 +281,9 @@ ssh -T git@github.com                         # «Hi <login>! You've successfull
 
 ### Скачайте образы заранее
 
-Чтобы не ждать сеть в аудитории:
+Чтобы не ждать сеть в аудитории — из нашего реестра (см. [Образы курса из GHCR](#образы-курса-из-нашего-реестра-ghcr)):
 ```bash
-docker pull postgres:17-alpine
-docker pull redis:7-alpine
-docker pull python:3.12-slim
-docker pull nginx:1.27-alpine
-docker pull zricethezav/gitleaks:latest
+bash scripts/pull-images.sh
 ```
 
 ### Финальная проверка
@@ -264,6 +291,7 @@ docker pull zricethezav/gitleaks:latest
 ```bash
 docker compose version && git --version && terraform -version && ansible --version && git filter-repo --version
 git clone https://github.com/tenroman1-design/devops-lab.git && cd devops-lab
+bash scripts/pull-images.sh
 ```
 Все команды отработали без ошибок — вы готовы. Если нет — напишите в чат группы текст ошибки и свою ОС.
 
@@ -407,7 +435,7 @@ for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы и
 | Windows: `localhost:8000` не открывается | Нет проброса порта в VirtualBox | Настроить → Сеть → Проброс портов |
 | `port is already allocated` | Порт занят другим контейнером | `docker ps`, остановить лишнее или сменить порт |
 | backend: `Connection refused` к БД | `localhost` вместо имени сервиса | В URL должно быть `db`, не `localhost` |
-| `pull` висит на `Waiting` / TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Зеркала Docker Hub](#зеркала-docker-hub-обязательно-для-россии) |
+| `pull` висит на `Waiting` / TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Образы из GHCR](#образы-курса-из-нашего-реестра-ghcr) или [зеркала](#зеркала-docker-hub-запасной-вариант) |
 | `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
 | `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
 | Ansible: `UNREACHABLE` | ВМ ещё грузится / не тот пользователь / закрыт порт 22 | Подождать 1–2 мин, проверить `ansible_user` |
