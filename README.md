@@ -1,2 +1,315 @@
-# devops-lab
-Учебный проект курса DevOps (НИУ ВШЭ): Docker Compose, секреты, Terraform, Ansible, CI/CD, Nginx
+# devops-lab — учебный проект для модулей 3–4
+
+Сервис: **backend (Flask) + PostgreSQL + Redis**, дальше — **Nginx**, **CI/CD** и деплой в облако cloud.ru.
+
+| Эндпоинт | Что делает |
+|---|---|
+| `GET /` | версия и имя контейнера (`served_by`), который ответил |
+| `GET /health` | проверяет связь с PostgreSQL и Redis (200 / 503) |
+| `GET /hits` | счётчик в Redis |
+| `GET/POST /notes` | заметки в PostgreSQL: `{"text": "..."}` |
+
+**Перед первым занятием** пройдите раздел [«Подготовка ноутбука»](#подготовка-ноутбука) — на практике времени на установку не будет.
+
+## Содержание
+- [Подготовка ноутбука](#подготовка-ноутбука)
+- [Занятие 8. Docker Compose](#занятие-8-docker-compose)
+- [Занятие 9. Конфигурация и секреты](#занятие-9-конфигурация-и-секреты)
+- [Занятие 10. Terraform + Ansible](#занятие-10-terraform--ansible-cloudru)
+- [Занятие 11. CI](#занятие-11-ci)
+- [Занятие 12. CD + Nginx](#занятие-12-cd--nginx)
+- [Если что-то не работает](#если-что-то-не-работает)
+
+## Структура репозитория
+
+```
+app/                      код, Dockerfile, тесты
+lesson08/                 docker-compose.yml с захардкоженными паролями (так делать НЕ надо)
+lesson09/                 тот же compose, но конфигурация в .env
+lesson10/terraform/       ВМ + сеть в cloud.ru (провайдер sbercloud)
+lesson10/ansible/         установка Docker на ВМ
+lesson12/                 production compose + nginx
+.github/workflows/        CI/CD-пайплайн (занятия 11–12)
+```
+
+---
+
+## Подготовка ноутбука
+
+На macOS Docker Desktop у вас уже стоит; на Windows Docker ставится внутрь виртуальной машины (ниже). Выберите свою ОС.
+
+| Инструмент | Зачем | Занятие |
+|---|---|---|
+| Docker + Docker Compose | запуск контейнеров | 8–12 |
+| Git + аккаунт GitHub + SSH-ключ | код, CI/CD | 8–12 |
+| git-filter-repo | чистка истории от секретов | 9 |
+| Terraform | создание ВМ в облаке | 10 |
+| Ansible | настройка ВМ | 10 |
+| Редактор (VS Code) | удобно, но не обязательно | — |
+
+### Windows → VirtualBox + Ubuntu Server
+
+На Windows работаем внутри виртуальной машины с Ubuntu Server: там те же команды, что на серверах в облаке, и работает Ansible. Docker ставим **внутрь ВМ**, Docker Desktop на Windows для курса не нужен.
+
+**Требования:** 8 ГБ ОЗУ на ноутбуке (ВМ заберёт 4 ГБ), 30 ГБ свободного места, включённая виртуализация (Intel VT-x / AMD-V) в BIOS.
+
+#### 1. Установка ВМ
+1. Скачайте и установите [VirtualBox](https://www.virtualbox.org/wiki/Downloads) (Windows hosts).
+2. Скачайте образ [Ubuntu Server 24.04 LTS](https://ubuntu.com/download/server) (`.iso`).
+3. VirtualBox → **Создать**: имя `devops`, ISO — скачанный образ, галочку «Пропустить автоматическую установку» **поставить**. Ресурсы: **2 CPU, 4096 МБ RAM, диск 25 ГБ**.
+4. Запустите ВМ и пройдите установщик Ubuntu. Всё по умолчанию, кроме двух моментов:
+   - придумайте имя пользователя и пароль (запомните!);
+   - на шаге **SSH Setup** отметьте **Install OpenSSH server**.
+5. После установки: **Reboot Now**, при запросе извлеките ISO (Устройства → Оптические диски).
+
+#### 2. Проброс портов (чтобы заходить из Windows)
+Выключите ВМ → **Настроить → Сеть → Адаптер 1 (NAT) → Дополнительно → Проброс портов** и добавьте правила:
+
+| Имя | Порт хоста | Порт гостя | Зачем |
+|---|---|---|---|
+| ssh | 2222 | 22 | подключаться к ВМ по SSH |
+| app | 8000 | 8000 | backend (занятия 8–9) |
+| app1 | 8001 | 8001 | реплики при `--scale` |
+| app2 | 8002 | 8002 | реплики при `--scale` |
+| web | 8080 | 80 | nginx |
+
+Протокол TCP, IP-адреса оставьте пустыми.
+
+#### 3. Подключение из Windows
+Запустите ВМ (можно «Запустить → Запуск в фоновом режиме») и работайте из **Windows Terminal / PowerShell**, а не из окна VirtualBox — так работает копирование и вставка:
+```powershell
+ssh -p 2222 <ваш_пользователь>@localhost
+```
+Удобнее всего — **VS Code** с расширением **Remote - SSH**: Connect to Host → `<ваш_пользователь>@localhost:2222`. Редактируете файлы прямо внутри ВМ.
+
+#### 4. Всё остальное — внутри ВМ
+```bash
+sudo apt update && sudo apt -y upgrade
+sudo apt install -y git curl unzip ansible pipx
+pipx ensurepath && pipx install git-filter-repo
+
+# Docker Engine + Compose (официальный скрипт Docker)
+curl -fsSL https://get.docker.com | sudo sh
+sudo usermod -aG docker $USER
+exit                                   # перелогиньтесь, чтобы заработала группа docker
+```
+Снова подключитесь по SSH и проверьте: `docker run --rm hello-world` и `docker compose version`.
+
+Terraform — см. раздел [Terraform](#terraform-для-всех) ниже (версия **linux_amd64**). SSH-ключ для GitHub создавайте **внутри ВМ**.
+
+> **В браузере Windows** сервисы ВМ открываются по проброшенным портам: `http://localhost:8000`, nginx — `http://localhost:8080`.
+> **Если ВМ не стартует** с ошибкой про VT-x/AMD-V — включите виртуализацию в BIOS. Если VirtualBox работает очень медленно (черепаха в строке состояния) — отключите Hyper-V: PowerShell от администратора `bcdedit /set hypervisorlaunchtype off` и перезагрузка (Docker Desktop и WSL после этого работать не будут — для курса они не нужны).
+
+### macOS
+
+Нужен [Homebrew](https://brew.sh).
+```bash
+brew install git ansible git-filter-repo
+```
+Terraform — см. следующий раздел (версия **darwin_arm64** для Mac на M1–M4, **darwin_amd64** для Intel).
+
+### Terraform (для всех)
+
+Сайт HashiCorp и реестр Terraform из России недоступны, поэтому используем **зеркало cloud.ru**.
+
+1. Скачайте архив для своей платформы: https://tf-mirror-distr.obs-website.ru-moscow-1.hc.sbercloud.ru/
+2. Распакуйте и положите бинарник в PATH:
+   ```bash
+   unzip terraform_*.zip
+   sudo mv terraform /usr/local/bin/
+   terraform -version
+   ```
+   > macOS может заблокировать запуск скачанного файла: `xattr -d com.apple.quarantine /usr/local/bin/terraform`
+3. Создайте файл `~/.terraformrc`, чтобы провайдеры тоже качались с зеркала:
+   ```hcl
+   provider_installation {
+     network_mirror {
+       url     = "https://terraform.cloud.ru/"
+       include = ["registry.terraform.io/*/*"]
+     }
+     direct {
+       exclude = ["registry.terraform.io/*/*"]
+     }
+   }
+   ```
+
+### Git, GitHub и SSH-ключ (для всех)
+
+```bash
+git config --global user.name  "Имя Фамилия"
+git config --global user.email "you@edu.hse.ru"
+ssh-keygen -t ed25519 -C "you@edu.hse.ru"     # Enter на все вопросы
+cat ~/.ssh/id_ed25519.pub                     # скопировать → GitHub: Settings → SSH and GPG keys → New SSH key
+ssh -T git@github.com                         # «Hi <login>! You've successfully authenticated»
+```
+
+### Скачайте образы заранее
+
+Чтобы не ждать сеть в аудитории:
+```bash
+docker pull postgres:17-alpine
+docker pull redis:7-alpine
+docker pull python:3.12-slim
+docker pull nginx:1.27-alpine
+docker pull zricethezav/gitleaks:latest
+```
+
+### Финальная проверка
+
+```bash
+docker compose version && git --version && terraform -version && ansible --version && git filter-repo --version
+git clone https://github.com/tenroman1-design/devops-lab.git && cd devops-lab
+```
+Все команды отработали без ошибок — вы готовы. Если нет — напишите в чат группы текст ошибки и свою ОС.
+
+---
+
+## Занятие 8. Docker Compose
+
+```bash
+cd lesson08
+docker compose up -d --build          # собрать и запустить
+docker compose ps                     # все сервисы healthy?
+curl localhost:8000/health            # {"status": {"postgres":"ok","redis":"ok"}}
+curl localhost:8000/hits              # счётчик растёт
+curl -X POST -H 'Content-Type: application/json' -d '{"text":"hello"}' localhost:8000/notes
+```
+
+**Сеть.** Сервисы видят друг друга по имени сервиса:
+```bash
+docker compose exec backend python -c "import socket; print(socket.gethostbyname('db'))"
+docker network ls                     # сеть lesson08_backend-net
+docker network inspect lesson08_backend-net
+```
+
+**Тома.** Данные переживают пересоздание контейнера:
+```bash
+docker compose down                   # контейнеры удалены, том остался
+docker compose up -d
+curl localhost:8000/notes             # заметка на месте
+docker volume ls                      # lesson08_pgdata
+docker compose down -v                # -v удалит и том (данные пропадут!)
+```
+
+**Масштабирование.**
+```bash
+docker compose up -d --scale backend=3
+docker compose ps                     # 3 бэкенда, каждый получил свой порт из 8000–8005
+curl localhost:8000/hits; curl localhost:8001/hits; curl localhost:8002/hits   # разные served_by, общий счётчик в Redis
+```
+Попробуйте заменить `"8000-8005:8000"` на `"8000:8000"` и снова `--scale backend=3` — увидите ошибку *port is already allocated*. Почему? Как это решит Nginx — узнаем на занятии 12.
+
+---
+
+## Занятие 9. Конфигурация и секреты
+
+```bash
+cd lesson09
+docker compose config                 # ошибка: required variable POSTGRES_USER is missing
+cp .env.example .env                  # впишите свой пароль
+docker compose config                 # видно, какие значения подставились
+docker compose up -d --build
+```
+
+### Эмуляция утечки секрета (делать в ОТДЕЛЬНОЙ папке!)
+```bash
+mkdir /tmp/leak-demo && cd /tmp/leak-demo && git init
+echo "POSTGRES_PASSWORD=Sup3rS3cret" > .env
+git add .env && git commit -m "add config"        # ошибка!
+
+# «Удаляем» — но это не помогает:
+git rm --cached .env && echo ".env" > .gitignore
+git add .gitignore && git commit -m "remove .env"
+git log -p --all -S "Sup3rS3cret"                  # пароль всё ещё в истории
+
+# Находим сканером:
+docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo -v
+
+# Переписываем историю:
+pip install git-filter-repo
+git filter-repo --invert-paths --path .env --force
+git log -p --all -S "Sup3rS3cret"                  # пусто
+```
+Главное правило: **если секрет попал в удалённый репозиторий — считаем его скомпрометированным и меняем (ротация)**. Переписывание истории — вторично.
+
+---
+
+## Занятие 10. Terraform + Ansible (cloud.ru)
+
+Нужны: Terraform с настроенным `~/.terraformrc` (см. [подготовку](#terraform-для-всех)), Ansible, ключи доступа cloud.ru.
+
+```bash
+cd lesson10/terraform
+export SBC_ACCESS_KEY="..."  SBC_SECRET_KEY="..."   # ключи из консоли cloud.ru, НЕ в код
+cp terraform.tfvars.example terraform.tfvars       # впишите prefix
+terraform init
+terraform plan
+terraform apply
+terraform output public_ip
+```
+Terraform сам создаст `../ansible/inventory.ini`. Дальше:
+```bash
+cd ../ansible
+ansible web -m ping
+ansible-playbook playbook.yml         # 1-й запуск: changed=N
+ansible-playbook playbook.yml         # 2-й запуск: changed=0 — это идемпотентность
+ssh deploy@<IP> docker ps             # deploy в группе docker, sudo не нужен
+```
+> Имя образа ОС и пользователь по умолчанию (`root`/`ubuntu`) зависят от облака — сверьтесь с консолью.
+> Не забудьте в конце курса: `terraform destroy`.
+
+---
+
+## Занятие 11. CI
+
+1. Сделайте **Fork** этого репозитория (кнопка вверху справа) и клонируйте свой форк. Во вкладке **Actions** форка нажмите «I understand my workflows, go ahead and enable them».
+2. Откройте вкладку **Actions** — пайплайн `ci-cd` запустится на push.
+3. Создайте ветку, сломайте тест или добавьте лишний импорт, откройте Pull Request — job `test` станет красным.
+4. Почините, смёржите в `main` — появятся jobs `build` → образ в **Packages** (`ghcr.io/<login>/<repo>/backend`).
+
+---
+
+## Занятие 12. CD + Nginx
+
+В репозитории: **Settings → Secrets and variables → Actions**
+
+| Тип | Имя | Значение |
+|---|---|---|
+| Secret | `SSH_HOST` | публичный IP ВМ |
+| Secret | `SSH_USER` | `deploy` |
+| Secret | `SSH_PRIVATE_KEY` | приватный ключ, чей публичный ключ добавлен пользователю deploy |
+| Secret | `POSTGRES_USER` / `POSTGRES_PASSWORD` | учётка БД для прода |
+| Variable | `DEPLOY_ENABLED` | `true` |
+
+Push в `main` → test → build → deploy → smoke test. Проверка:
+```bash
+curl http://<IP>/            # served_by меняется?
+ssh deploy@<IP> "cd /opt/app && docker compose up -d --scale backend=3 && docker compose restart nginx"
+for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы идут на разные реплики
+```
+
+> Ключ для CI сделайте отдельный: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/ci_deploy` и `ssh-copy-id -i ~/.ssh/ci_deploy.pub deploy@<IP>`.
+
+---
+
+## Если что-то не работает
+
+Первое действие всегда: `docker compose ps` → `docker compose logs <сервис>`.
+
+| Симптом | Причина | Решение |
+|---|---|---|
+| `Cannot connect to the Docker daemon` / `permission denied` на docker.sock | Docker не запущен / пользователь не в группе docker | macOS: запустить Docker Desktop; ВМ: `sudo usermod -aG docker $USER` и перелогиниться |
+| Windows: `localhost:8000` не открывается | Нет проброса порта в VirtualBox | Настроить → Сеть → Проброс портов |
+| `port is already allocated` | Порт занят другим контейнером | `docker ps`, остановить лишнее или сменить порт |
+| backend: `Connection refused` к БД | `localhost` вместо имени сервиса | В URL должно быть `db`, не `localhost` |
+| `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
+| `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
+| Ansible: `UNREACHABLE` | ВМ ещё грузится / не тот пользователь / закрыт порт 22 | Подождать 1–2 мин, проверить `ansible_user` |
+| Job `deploy` — skipped | Нет переменной `DEPLOY_ENABLED=true` | Settings → Secrets and variables → Actions → **Variables** |
+
+## Не забудьте
+
+После окончания курса удалите облачные ресурсы — они тарифицируются, пока существуют:
+```bash
+cd lesson10/terraform && terraform destroy
+```

@@ -1,0 +1,10 @@
+.env
+!.env.example
+__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+.terraform/
+*.tfstate*
+terraform.tfvars
+lesson10/ansible/inventory.ini
