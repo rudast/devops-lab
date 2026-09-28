@@ -1,10 +1,12 @@
 # Занятие 12: production-вариант на облачной ВМ.
 # Бэкенд больше НЕ собирается на сервере — берём готовый образ из registry (GHCR).
 # Наружу открыт только Nginx (порт 80). Бэкенд, БД и кэш — во внутренней сети.
+# Базовые образы (nginx, postgres, redis) берём из нашего GHCR — это копии из Docker Hub,
+# который из России работает нестабильно (см. workflow mirror-images).
 
 services:
   nginx:
-    image: nginx:1.27-alpine
+    image: ghcr.io/tenroman1-design/devops-lab/nginx:1.27-alpine
     ports:
       - "80:80"
     volumes:
@@ -28,7 +30,7 @@ services:
     restart: unless-stopped
 
   db:
-    image: postgres:17-alpine
+    image: ghcr.io/tenroman1-design/devops-lab/postgres:17-alpine
     environment:
       POSTGRES_USER: ${POSTGRES_USER:?}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?}
@@ -44,7 +46,7 @@ services:
     restart: unless-stopped
 
   cache:
-    image: redis:7-alpine
+    image: ghcr.io/tenroman1-design/devops-lab/redis:7-alpine
     networks: [backend-net]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
