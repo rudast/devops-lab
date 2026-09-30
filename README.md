@@ -417,7 +417,7 @@ ssh deploy@<IP> docker ps             # deploy в группе docker, sudo не
 Push в `main` → test → build → deploy → smoke test. Проверка:
 ```bash
 curl http://<IP>/            # served_by меняется?
-ssh deploy@<IP> "cd /opt/app && docker compose up -d --scale backend=3 && docker compose restart nginx"
+ssh deploy@<IP> "cd /opt/app && docker compose up -d --scale backend=3"   # nginx сам увидит новые реплики через ~5 с
 for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы идут на разные реплики
 ```
 
