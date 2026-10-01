@@ -18,10 +18,10 @@
   - [Образы курса из GHCR](#образы-курса-из-нашего-реестра-ghcr)
   - [Зеркала Docker Hub (запасной вариант)](#зеркала-docker-hub-запасной-вариант)
 - [Занятие 8. Docker Compose](#занятие-8-docker-compose)
-- [Занятие 9. Конфигурация и секреты](#занятие-9-конфигурация-и-секреты)
-- [Занятие 10. Terraform + Ansible](#занятие-10-terraform--ansible-cloudru)
-- [Занятие 11. CI](#занятие-11-ci)
-- [Занятие 12. CD + Nginx](#занятие-12-cd--nginx)
+- [Занятие 9. Nginx перед бэкендом + конфигурация и секреты](#занятие-9-nginx-перед-бэкендом--конфигурация-и-секреты)
+- [Занятие 10. Тот же стек — в облако: Terraform + Ansible](#занятие-10-тот-же-стек--в-облако-terraform--ansible)
+- [Занятие 11. CI: проверяем и собираем образ](#занятие-11-ci-проверяем-и-собираем-образ-автоматически)
+- [Занятие 12. CD: деплой без рук](#занятие-12-cd-деплой-без-рук)
 - [Если что-то не работает](#если-что-то-не-работает)
 
 ## Структура репозитория
@@ -29,10 +29,10 @@
 ```
 app/                      код, Dockerfile, тесты
 lesson08/                 docker-compose.yml с захардкоженными паролями (так делать НЕ надо)
-lesson09/                 тот же compose, но конфигурация в .env
+lesson09/                 + Nginx (reverse proxy) перед бэкендом, конфигурация в .env
 lesson10/terraform/       ВМ + сеть в cloud.ru (провайдер sbercloud)
-lesson10/ansible/         установка Docker на ВМ
-lesson12/                 production compose + nginx
+lesson10/ansible/         установка Docker на ВМ (playbook.yml) и выкатка стека lesson09 (deploy.yml)
+lesson12/                 production compose: бэкенд из GHCR, деплой из CI/CD
 .github/workflows/        CI/CD-пайплайн (занятия 11–12) и копирование образов в GHCR
 scripts/pull-images.sh    скачать образы курса из GHCR
 ```
@@ -330,21 +330,63 @@ docker compose up -d --scale backend=3
 docker compose ps                     # 3 бэкенда, каждый получил свой порт из 8000–8005
 curl localhost:8000/hits; curl localhost:8001/hits; curl localhost:8002/hits   # разные served_by, общий счётчик в Redis
 ```
-Попробуйте заменить `"8000-8005:8000"` на `"8000:8000"` и снова `--scale backend=3` — увидите ошибку *port is already allocated*. Почему? Как это решит Nginx — узнаем на занятии 12.
+Попробуйте заменить `"8000-8005:8000"` на `"8000:8000"` и снова `--scale backend=3` — увидите ошибку *port is already allocated*. Почему? Как это решит Nginx — на занятии 9.
 
 ---
 
-## Занятие 9. Конфигурация и секреты
+## Занятие 9. Nginx перед бэкендом + конфигурация и секреты
 
+Продолжаем стек занятия 8. Проблема, на которой мы остановились: при `--scale backend=3` каждой копии нужен свой порт на хосте, и пользователю непонятно, куда стучаться. Решение — **reverse proxy**: наружу открыт только Nginx, а он сам раздаёт запросы копиям бэкенда. Заодно убираем пароли из compose-файла в `.env`.
+
+```
+браузер ──:80──▶ nginx ──▶ backend ×N ──▶ postgres, redis
+                 (frontend-net)        (backend-net)
+```
+
+### Часть 1. Reverse proxy (40 мин)
 ```bash
 cd lesson09
+docker compose -f ../lesson08/docker-compose.yml down     # погасить стек занятия 8, чтобы освободить порты
+cp .env.example .env                                     # впишите свой пароль (подробнее — в части 2)
+docker compose up -d --build
+docker compose ps                     # опубликован только порт nginx (80 -> 80)
+curl localhost/                       # ответил backend через nginx
+curl localhost/nginx-health           # ответил сам nginx
+```
+> Порт 80 занят или нет прав? В `.env` поставьте `HTTP_PORT=8080` и обращайтесь к `localhost:8080`.
+> Windows/VirtualBox: в браузере Windows — `http://localhost:8080` (проброс 8080 → 80 из подготовки).
+
+**Масштабирование без конфликта портов:**
+```bash
+docker compose up -d --scale backend=3
+sleep 5                               # nginx перечитывает DNS каждые 5 с (resolve в nginx.conf)
+for i in $(seq 6); do curl -s localhost/hits; echo; done   # served_by чередуется, счётчик общий
+```
+
+**Отказоустойчивость:**
+```bash
+docker compose logs -f nginx          # в другом окне: журнал запросов
+docker stop devops-lab-backend-1      # «уронили» одну копию
+for i in $(seq 6); do curl -s localhost/hits; echo; done   # отвечают оставшиеся
+docker compose stop backend           # уронили все
+curl -i localhost/                    # 502 Bad Gateway — nginx жив, а за ним никого
+docker compose up -d --scale backend=3
+```
+
+**Что посмотреть в `nginx/nginx.conf`:** `upstream` с одной строкой `server backend:8000 resolve` (почему одной — объяснено в комментариях), `proxy_pass`, заголовки `X-Forwarded-*`, `location = /nginx-health`.
+
+### Часть 2. Конфигурация и секреты (40 мин)
+```bash
+rm .env
 docker compose config                 # ошибка: required variable POSTGRES_USER is missing
 cp .env.example .env                  # впишите свой пароль
 docker compose config                 # видно, какие значения подставились
-docker compose up -d --build
+# поменяйте в .env APP_VERSION=v2 и перезапустите — версия сменится без правки кода:
+docker compose up -d
+curl localhost/
 ```
 
-### Эмуляция утечки секрета (делать в ОТДЕЛЬНОЙ папке!)
+#### Эмуляция утечки секрета (делать в ОТДЕЛЬНОЙ папке!)
 ```bash
 mkdir /tmp/leak-demo && cd /tmp/leak-demo && git init
 echo "POSTGRES_PASSWORD=Sup3rS3cret" > .env
@@ -359,50 +401,95 @@ git log -p --all -S "Sup3rS3cret"                  # пароль всё ещё 
 docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo -v
 
 # Переписываем историю:
-pip install git-filter-repo
 git filter-repo --invert-paths --path .env --force
 git log -p --all -S "Sup3rS3cret"                  # пусто
 ```
 Главное правило: **если секрет попал в удалённый репозиторий — считаем его скомпрометированным и меняем (ротация)**. Переписывание истории — вторично.
 
+### Задания для тех, кто закончил раньше
+1. Добавьте в `nginx.conf` свою страницу для 502: `error_page 502 /502.html;` и `location = /502.html { return 502 "Сервис перезапускается, обновите страницу через минуту\n"; }`.
+2. Ограничьте частоту запросов: `limit_req_zone $binary_remote_addr zone=one:10m rate=5r/s;` (в начале файла) и `limit_req zone=one burst=10;` в `location /`. Проверьте: `for i in $(seq 50); do curl -s -o /dev/null -w "%{http_code} " localhost/; done`.
+3. Включите сжатие: `gzip on; gzip_types application/json;` и сравните `curl -sI -H 'Accept-Encoding: gzip' localhost/notes`.
+4. Переведите пароль Postgres на Docker secrets: `POSTGRES_PASSWORD_FILE` + раздел `secrets:` в compose.
+
 ---
 
-## Занятие 10. Terraform + Ansible (cloud.ru)
+## Занятие 10. Тот же стек — в облако: Terraform + Ansible
+
+Продолжение занятия 9: стек, который работал у вас на ноутбуке, теперь поднимаем на виртуальной машине в cloud.ru. Ничего руками в консоли: машину создаёт **Terraform**, Docker ставит **Ansible**, им же выкатываем приложение.
 
 Нужны: Terraform с настроенным `~/.terraformrc` (см. [подготовку](#terraform-для-всех)), Ansible, ключи доступа cloud.ru.
 
+### Шаг 1. Машина и сеть — Terraform
 ```bash
 cd lesson10/terraform
 export SBC_ACCESS_KEY="..."  SBC_SECRET_KEY="..."   # ключи из консоли cloud.ru, НЕ в код
-cp terraform.tfvars.example terraform.tfvars       # впишите prefix
+cp terraform.tfvars.example terraform.tfvars       # впишите prefix (фамилия латиницей)
 terraform init
-terraform plan
+terraform plan                                     # читаем план: что и в каком порядке создастся
 terraform apply
 terraform output public_ip
 ```
-Terraform сам создаст `../ansible/inventory.ini`. Дальше:
+Terraform сам создаст `../ansible/inventory.ini` с IP машины.
+
+### Шаг 2. Docker на машине — Ansible
 ```bash
 cd ../ansible
 ansible web -m ping
 ansible-playbook playbook.yml         # 1-й запуск: changed=N
 ansible-playbook playbook.yml         # 2-й запуск: changed=0 — это идемпотентность
-ssh deploy@<IP> docker ps             # deploy в группе docker, sudo не нужен
+```
+
+### Шаг 3. Наш стек на машине — Ansible
+```bash
+export POSTGRES_PASSWORD='придумайте-пароль-для-сервера'
+ansible-playbook deploy.yml           # копирует app/ и lesson09/, пишет .env, docker compose up
+curl http://<IP>/                     # тот же сервис, что был на ноутбуке, — теперь в облаке
+ansible-playbook deploy.yml           # второй раз: changed=0
+ansible-playbook deploy.yml -e app_version=v2    # выкатили «новую версию»
+curl http://<IP>/
 ```
 > Имя образа ОС и пользователь по умолчанию (`root`/`ubuntu`) зависят от облака — сверьтесь с консолью.
-> Не забудьте в конце курса: `terraform destroy`.
+
+### Задания для тех, кто закончил раньше
+1. Поменяйте размер диска в `variables.tf` и посмотрите, что покажет `terraform plan`: изменение на месте или пересоздание?
+2. Руками в консоли cloud.ru добавьте правило в группу безопасности и найдите его через `terraform plan` (drift).
+3. Спрячьте пароль в Ansible Vault: `ansible-vault create secrets.yml` и подключите через `vars_files`.
+4. Сделайте `--scale` через Ansible: добавьте в задачу `docker_compose_v2` параметр `scale: { backend: 3 }`.
 
 ---
 
-## Занятие 11. CI
+## Занятие 11. CI: проверяем и собираем образ автоматически
+
+Продолжение занятия 10: сейчас образ бэкенда собирается прямо на сервере — долго, без тестов, и непонятно, какая версия где работает. Переносим сборку в GitHub Actions: каждый push проверяется, а из `main` собирается образ с тегом коммита и кладётся в GHCR.
 
 1. Сделайте **Fork** этого репозитория (кнопка вверху справа) и клонируйте свой форк. Во вкладке **Actions** форка нажмите «I understand my workflows, go ahead and enable them».
 2. Откройте вкладку **Actions** — пайплайн `ci-cd` запустится на push.
-3. Создайте ветку, сломайте тест или добавьте лишний импорт, откройте Pull Request — job `test` станет красным.
-4. Почините, смёржите в `main` — появятся jobs `build` → образ в **Packages** (`ghcr.io/<login>/<repo>/backend`).
+3. Создайте ветку, добавьте лишний импорт (`echo "import json" >> app/main.py`), откройте Pull Request — job `test` станет красным.
+   > ⚠️ GitHub по умолчанию предлагает открыть PR в исходный репозиторий курса. Переключите **base repository** на свой форк.
+4. Почините, смёржите в `main` — появится job `build` → образ в **Packages** (`ghcr.io/<login>/<repo>/backend:sha-…`).
+5. Скачайте свой образ и запустите его локально вместо сборки — это и есть «артефакт»:
+   ```bash
+   docker pull ghcr.io/<login>/devops-lab/backend:latest
+   ```
+
+### Задания для тех, кто закончил раньше
+1. Включите защиту ветки `main`: Settings → Branches → Require status checks to pass (`test`).
+2. Добавьте в job `test` шаг сканирования секретов — продолжение занятия 9:
+   ```yaml
+   - uses: actions/checkout@v7
+     with: { fetch-depth: 0 }
+   - name: Gitleaks
+     working-directory: .
+     run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo -v
+   ```
+3. Напишите ещё один тест в `app/tests/test_app.py` — например, что `/` возвращает поле `service`.
 
 ---
 
-## Занятие 12. CD + Nginx
+## Занятие 12. CD: деплой без рук
+
+Продолжение занятий 10 и 11: на занятии 10 мы выкатывали стек командой `ansible-playbook deploy.yml` с ноутбука, на занятии 11 научились собирать образ в CI. Теперь соединяем: после мёржа в `main` пайплайн **сам** заходит на ВМ, скачивает свежий образ из GHCR и перезапускает стек (`lesson12/docker-compose.prod.yml` — тот же стек, но бэкенд берётся из реестра, а не собирается на сервере). Имя проекта то же (`devops-lab`), поэтому стек занятия 10 просто заменяется, а данные в томе сохраняются.
 
 В репозитории: **Settings → Secrets and variables → Actions**
 
@@ -411,17 +498,24 @@ ssh deploy@<IP> docker ps             # deploy в группе docker, sudo не
 | Secret | `SSH_HOST` | публичный IP ВМ |
 | Secret | `SSH_USER` | `deploy` |
 | Secret | `SSH_PRIVATE_KEY` | приватный ключ, чей публичный ключ добавлен пользователю deploy |
-| Secret | `POSTGRES_USER` / `POSTGRES_PASSWORD` | учётка БД для прода |
+| Secret | `POSTGRES_USER` / `POSTGRES_PASSWORD` | те же, что на занятии 10 (иначе Postgres не пустит: пароль уже записан в томе) |
 | Variable | `DEPLOY_ENABLED` | `true` |
+
+> Ключ для CI сделайте отдельный: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/ci_deploy` и `ssh-copy-id -i ~/.ssh/ci_deploy.pub deploy@<IP>`.
 
 Push в `main` → test → build → deploy → smoke test. Проверка:
 ```bash
-curl http://<IP>/            # served_by меняется?
+curl http://<IP>/            # version = sha-<коммит>
 ssh deploy@<IP> "cd /opt/app && docker compose up -d --scale backend=3"   # nginx сам увидит новые реплики через ~5 с
 for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы идут на разные реплики
 ```
 
-> Ключ для CI сделайте отдельный: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/ci_deploy` и `ssh-copy-id -i ~/.ssh/ci_deploy.pub deploy@<IP>`.
+**Откат:** Actions → откройте прошлый успешный запуск `ci-cd` → **Re-run all jobs** — пересоберётся и выкатится тот коммит.
+
+### Задания для тех, кто закончил раньше
+1. Включите ручное подтверждение деплоя: Settings → Environments → `production` → Required reviewers. Получится Continuous Delivery.
+2. Сломайте `/health`: в `app/main.py` замените `(200 if ok else 503)` на `503` и запушьте. Тесты пройдут (без базы они и ждут 503), деплой выкатится, а smoke test покрасит пайплайн в красный. Откатитесь через Re-run прошлого успешного запуска.
+3. Замените ssh-шаги в job `deploy` на вызов `ansible-playbook` из занятия 10.
 
 ---
 
