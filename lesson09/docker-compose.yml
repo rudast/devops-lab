@@ -1,8 +1,35 @@
-# Занятие 9: та же связка, но БЕЗ секретов в файле.
-# Значения подставляются из файла .env (лежит рядом, в Git НЕ коммитится).
+# Занятие 9: продолжаем стек занятия 8.
+#   1) Перед бэкендом встаёт Nginx (reverse proxy): наружу открыт ТОЛЬКО он.
+#   2) Пароли и настройки уезжают из файла в .env (лежит рядом, в Git НЕ коммитится).
 # Синтаксис ${VAR:?текст} — упасть с ошибкой, если переменная не задана.
 
+name: devops-lab          # имя проекта: тома и сети будут devops-lab_*, так же назовётся стек на сервере
+
 services:
+  nginx:
+    image: nginx:1.27-alpine
+    ports:
+      - "${HTTP_PORT:-80}:80"                      # единственный опубликованный порт
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    networks: [frontend-net]
+    depends_on: [backend]
+
+  backend:
+    build: ../app
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-appdb}
+      REDIS_URL: redis://cache:6379/0
+      APP_VERSION: ${APP_VERSION:-dev}
+    # ports больше нет: бэкенд виден только Nginx'у во внутренней сети,
+    # поэтому --scale backend=N работает без конфликтов портов
+    networks: [frontend-net, backend-net]
+    depends_on:
+      db:
+        condition: service_healthy
+      cache:
+        condition: service_healthy
+
   db:
     image: postgres:17-alpine
     environment:
@@ -27,23 +54,9 @@ services:
       timeout: 3s
       retries: 10
 
-  backend:
-    build: ../app
-    environment:
-      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-appdb}
-      REDIS_URL: redis://cache:6379/0
-      APP_VERSION: ${APP_VERSION:-dev}
-    ports:
-      - "${BACKEND_PORTS:-8000-8005}:8000"
-    networks: [backend-net]
-    depends_on:
-      db:
-        condition: service_healthy
-      cache:
-        condition: service_healthy
-
 networks:
-  backend-net:
+  frontend-net:   # nginx <-> backend
+  backend-net:    # backend <-> db, cache (nginx сюда не видит)
 
 volumes:
   pgdata:
