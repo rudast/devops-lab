@@ -1,0 +1,96 @@
+---
+# Занятие 10: выкатываем НАШ стек из занятия 9 (nginx + backend + postgres + redis)
+# на ВМ, которую создал Terraform и подготовил playbook.yml.
+#
+# Запуск (пароль БД — из переменной окружения, НЕ из кода):
+#   export POSTGRES_PASSWORD='придумайте-пароль'
+#   ansible-playbook deploy.yml
+# Обновить версию:  ansible-playbook deploy.yml -e app_version=v2
+# Проверка идемпотентности: второй запуск без изменений -> changed=0
+
+- name: Deploy devops-lab stack
+  hosts: web
+  become: true
+  vars:
+    app_dir: /opt/app
+    repo_root: "{{ playbook_dir }}/../.."
+    registry: ghcr.io/tenroman1-design/devops-lab
+    base_images:                       # копии Docker Hub в нашем GHCR -> привычные имена
+      - { src: "postgres:17-alpine", dst: "postgres:17-alpine" }
+      - { src: "redis:7-alpine",     dst: "redis:7-alpine" }
+      - { src: "python:3.12-slim",   dst: "python:3.12-slim" }
+      - { src: "nginx:1.27-alpine",  dst: "nginx:1.27-alpine" }
+    postgres_user: app
+    postgres_password: "{{ lookup('ansible.builtin.env', 'POSTGRES_PASSWORD') }}"
+    app_version: lesson-10
+
+  tasks:
+    - name: Check that the DB password is set
+      ansible.builtin.assert:
+        that: postgres_password | length >= 8
+        fail_msg: "Задайте пароль: export POSTGRES_PASSWORD='...' (не короче 8 символов)"
+
+    - name: Pull base images from our GHCR and give them usual names
+      ansible.builtin.shell: |
+        set -e
+        docker pull -q {{ registry }}/{{ item.src }} > /dev/null
+        before=$(docker image inspect -f '{{ '{{' }}.Id{{ '}}' }}' {{ item.dst }} 2>/dev/null || true)
+        docker tag {{ registry }}/{{ item.src }} {{ item.dst }}
+        after=$(docker image inspect -f '{{ '{{' }}.Id{{ '}}' }}' {{ item.dst }})
+        [ "$before" = "$after" ] && echo unchanged || echo changed
+      args:
+        executable: /bin/bash
+      loop: "{{ base_images }}"
+      register: pull
+      changed_when: "'changed' in pull.stdout"
+
+    - name: Copy application source
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/app/"
+        dest: "{{ app_dir }}/app/"
+        mode: preserve
+      register: app_src
+
+    - name: Copy compose file and nginx config from lesson09
+      ansible.builtin.copy:
+        src: "{{ repo_root }}/lesson09/{{ item }}"
+        dest: "{{ app_dir }}/lesson09/{{ item }}"
+        mode: "0644"
+      loop:
+        - docker-compose.yml
+        - nginx/nginx.conf
+
+    - name: Write .env (only on the server, mode 0600)
+      ansible.builtin.copy:
+        dest: "{{ app_dir }}/lesson09/.env"
+        mode: "0600"
+        content: |
+          POSTGRES_USER={{ postgres_user }}
+          POSTGRES_PASSWORD={{ postgres_password }}
+          POSTGRES_DB=appdb
+          APP_VERSION={{ app_version }}
+          HTTP_PORT=80
+      no_log: true                     # не печатать пароль в вывод Ansible
+
+    - name: Start the stack (docker compose up -d --build)
+      community.docker.docker_compose_v2:
+        project_src: "{{ app_dir }}/lesson09"
+        # код изменился -> пересобрать образ; не изменился -> собрать, только если образа ещё нет.
+        # Так второй запуск без изменений даёт changed=0.
+        build: "{{ 'always' if app_src.changed else 'policy' }}"
+        pull: never                    # базовые образы уже взяты из GHCR выше
+        state: present
+      register: compose
+
+    - name: Wait until the service answers through nginx
+      ansible.builtin.uri:
+        url: http://localhost/health
+        return_content: true
+      register: health
+      retries: 12
+      delay: 5
+      until: health.status == 200
+
+    - name: Show result
+      ansible.builtin.debug:
+        msg: "Готово: http://{{ ansible_host | default(inventory_hostname) }}/  version={{ app_version }}"
