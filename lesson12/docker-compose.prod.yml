@@ -4,6 +4,8 @@
 # Базовые образы (nginx, postgres, redis) берём из нашего GHCR — это копии из Docker Hub,
 # который из России работает нестабильно (см. workflow mirror-images).
 
+name: devops-lab          # то же имя проекта, что и в lesson09: на сервере стек заменяется, данные в томе сохраняются
+
 services:
   nginx:
     image: ghcr.io/tenroman1-design/devops-lab/nginx:1.27-alpine
