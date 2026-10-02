@@ -19,7 +19,7 @@
   - [Зеркала Docker Hub (запасной вариант)](#зеркала-docker-hub-запасной-вариант)
 - [Занятие 8. Docker Compose](#занятие-8-docker-compose)
 - [Занятие 9. Nginx перед бэкендом + конфигурация и секреты](#занятие-9-nginx-перед-бэкендом--конфигурация-и-секреты)
-- [Занятие 10. Тот же стек — в облако: Terraform + Ansible](#занятие-10-тот-же-стек--в-облако-terraform--ansible)
+- [Занятие 10. IaC: своя ВМ в cloud.ru через Terraform](#занятие-10-infrastructure-as-code-своя-вм-в-cloudru-через-terraform)
 - [Занятие 11. CI: проверяем и собираем образ](#занятие-11-ci-проверяем-и-собираем-образ-автоматически)
 - [Занятие 12. CD: деплой без рук](#занятие-12-cd-деплой-без-рук)
 - [Если что-то не работает](#если-что-то-не-работает)
@@ -30,8 +30,11 @@
 app/                      код, Dockerfile, тесты
 lesson08/                 docker-compose.yml с захардкоженными паролями (так делать НЕ надо)
 lesson09/                 + Nginx (reverse proxy) перед бэкендом, конфигурация в .env
-lesson10/terraform/       ВМ + сеть в cloud.ru (провайдер sbercloud)
-lesson10/ansible/         установка Docker на ВМ (playbook.yml) и выкатка стека lesson09 (deploy.yml)
+lesson10/practice/        занятие 10: ваша рабочая папка Terraform
+lesson10/steps/           шаги 01…05: data sources, firewall, SSH-ключ, ВМ + IP, nginx через cloud-init
+lesson10/terraform/       готовое решение занятия 10 (ответы)
+lesson10/shared/          общая сеть курса (запускает преподаватель)
+lesson10/ansible/         Ansible: Docker на ВМ и выкатка стека (понадобится позже)
 lesson12/                 production compose: бэкенд из GHCR, деплой из CI/CD
 .github/workflows/        CI/CD-пайплайн (занятия 11–12) и копирование образов в GHCR
 scripts/pull-images.sh    скачать образы курса из GHCR
@@ -49,7 +52,7 @@ scripts/pull-images.sh    скачать образы курса из GHCR
 | Git + аккаунт GitHub + SSH-ключ | код, CI/CD | 8–12 |
 | git-filter-repo | чистка истории от секретов | 9 |
 | Terraform | создание ВМ в облаке | 10 |
-| Ansible | настройка ВМ | 10 |
+| Ansible | настройка ВМ | позже |
 | Редактор (VS Code) | удобно, но не обязательно | — |
 
 ### Windows → VirtualBox + Ubuntu Server
@@ -414,52 +417,120 @@ git log -p --all -S "Sup3rS3cret"                  # пусто
 
 ---
 
-## Занятие 10. Тот же стек — в облако: Terraform + Ansible
+## Занятие 10. Infrastructure as Code: своя ВМ в cloud.ru через Terraform
 
-Продолжение занятия 9: стек, который работал у вас на ноутбуке, теперь поднимаем на виртуальной машине в cloud.ru. Ничего руками в консоли: машину создаёт **Terraform**, Docker ставит **Ansible**, им же выкатываем приложение.
+На занятиях 8–9 стек жил на ноутбуке. Сегодня мы своими руками описываем в коде виртуальную машину в облаке, создаём её Terraform'ом, кладём на неё свой SSH-ключ и подключаемся. Затем меняем инфраструктуру и учимся читать план: что изменится на месте, а что будет пересоздано.
 
-Нужны: Terraform с настроенным `~/.terraformrc` (см. [подготовку](#terraform-для-всех)), Ansible, ключи доступа cloud.ru.
+**Как устроено:** все работают в **одном общем проекте** cloud.ru. Ключи доступа выдаёт преподаватель. Сеть (VPC и подсеть) уже создана заранее, папка `lesson10/shared`. Каждый создаёт свои ресурсы с префиксом — своей фамилией: `ivanov-vm`, `ivanov-sg`, `ivanov-key`, `ivanov-eip`.
 
-### Шаг 1. Машина и сеть — Terraform
+> ⚠️ В общем проекте видны ресурсы всех студентов. **Трогайте только свои** (с вашим префиксом). Terraform удаляет лишь то, что записано в **вашем** state.
+
+```
+lesson10/
+  practice/   ← здесь работаете вы: стартовые versions.tf, variables.tf
+  steps/      ← файлы шагов 01…05: копируете в practice по одному
+  terraform/  ← готовое решение (ответы) — подглядывайте, если застряли
+  shared/     ← общая сеть курса (запускает только преподаватель)
+```
+
+Перед занятием: Terraform и `~/.terraformrc` с зеркалом (см. [подготовку](#terraform-для-всех)) и SSH-ключ `~/.ssh/id_ed25519` (см. [Git, GitHub и SSH-ключ](#git-github-и-ssh-ключ-для-всех)). Студентам на Windows всё нужно делать **внутри ВМ VirtualBox**.
+
+### Часть 1. Подготовка (10 мин)
 ```bash
-cd lesson10/terraform
-export SBC_ACCESS_KEY="..."  SBC_SECRET_KEY="..."   # ключи из консоли cloud.ru, НЕ в код
-cp terraform.tfvars.example terraform.tfvars       # впишите prefix (фамилия латиницей)
-terraform init
-terraform plan                                     # читаем план: что и в каком порядке создастся
+cd devops-lab/lesson10/practice
+export SBC_ACCESS_KEY="…"  SBC_SECRET_KEY="…"   # выдаст преподаватель. НЕ в файлы, НЕ в Git
+ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519   # нет ключа — создайте (Enter на все вопросы)
+cp terraform.tfvars.example terraform.tfvars        # впишите prefix = "вашафамилия"
+terraform init          # скачает провайдер sbercloud с зеркала
+terraform validate      # синтаксис в порядке?
+terraform plan          # пока: No changes — в папке ещё нет ресурсов
+```
+> Переменные `SBC_*` живут только в текущем окне терминала: в новом окне сделайте `export` заново.
+
+### Часть 2. Собираем ВМ по шагам (25 мин)
+Каждый шаг выполняется одинаково: скопировать файл, прочитать его, выполнить **задание** внутри (если есть), затем `terraform plan` → прочитать план → `terraform apply`.
+
+| Шаг | Файл | Что создаём | В плане | Задание |
+|---|---|---|---|---|
+| 1 | `01-data.tf` | ничего — **читаем** образ Ubuntu, тип ВМ, общую сеть | `0 to add`, outputs | — |
+| 2 | `02-firewall.tf` | группа безопасности + правило SSH | `2 to add` | впишите порт SSH вместо `TODO_PORT` |
+| 3 | `03-keypair.tf` | ваш **публичный** ключ в облаке | `1 to add` | сошлитесь на переменную с путём к ключу |
+| 4 | `04-vm.tf` | ВМ + публичный IP + их связка | `3 to add` | сошлитесь на имя ключа из шага 3 |
+
+```bash
+cp ../steps/01-data.tf .
+terraform plan && terraform apply
+# … и так далее: 02, 03, 04
+terraform output                      # все выходные значения
+```
+> Ошибка `Invalid reference … TODO_…` означает, что задание шага ещё не выполнено. Прочитайте сообщение: Terraform показывает файл и строку.
+> На шаге 3 сравните отпечатки: `terraform output key_fingerprint` и `ssh-keygen -lf ~/.ssh/id_ed25519.pub`.
+
+### Часть 3. Подключаемся к ВМ (15 мин)
+ВМ загружается 1–2 минуты после `apply`.
+```bash
+ssh root@$(terraform output -raw public_ip)
+# первый вход: "Are you sure you want to continue connecting?" → yes (отпечаток сервера сохранится в ~/.ssh/known_hosts)
+```
+На ВМ осмотритесь:
+```bash
+hostname                        # ваша-фамилия-vm
+cat ~/.ssh/authorized_keys      # ваш публичный ключ — сравните с cat ~/.ssh/id_ed25519.pub на ноутбуке
+ip -4 addr                      # внутренний адрес 192.168.x.x — а заходили вы по публичному (EIP)
+nproc; free -h; df -h /         # сколько ресурсов описали в коде — столько и получили
+exit
+```
+Проверьте, что вход **только по ключу**:
+```bash
+ssh -o PubkeyAuthentication=no root@<IP>    # Permission denied — пароля нет, и это правильно
+```
+
+### Часть 4. Меняем инфраструктуру и читаем план (20 мин)
+1. **Изменение на месте (`~`).** В `04-vm.tf` добавьте тег `lesson = "10"` в `tags` → `terraform plan`: `~ update in-place` → `apply`.
+2. **Пересоздание правила (`-/+`).** Закройте SSH для всех, кроме себя. Узнайте свой IP: `curl -s ifconfig.me`. В `terraform.tfvars` пропишите `allowed_ssh_cidr = "<IP>/32"`. Выполните `terraform plan`: правило будет `-/+ must be replaced`, ищите в плане `# forces replacement`. Затем `apply` и проверьте, что `ssh` по-прежнему работает.
+3. **Пересоздание ВМ с cloud-init.** Ставим nginx при старте машины:
+   ```bash
+   cp ../steps/05-http.tf ../steps/cloud-init.yaml.tftpl .
+   ```
+   В `04-vm.tf` внутрь ресурса `sbercloud_compute_instance.vm` добавьте:
+   ```hcl
+   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", { prefix = var.prefix })
+   ```
+   ```bash
+   terraform fmt                 # выровнять код
+   terraform plan                # ВМ: -/+ (user_data forces replacement), правило HTTP: + create, EIP — без изменений!
+   terraform apply
+   curl http://$(terraform output -raw public_ip)/      # «Привет! Эту ВМ создал …» (через 1–2 мин после apply)
+   ssh root@$(terraform output -raw public_ip)          # WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!
+   ssh-keygen -R $(terraform output -raw public_ip)     # это новая ВМ с новым ключом сервера — забываем старый
+   ```
+   > IP остался прежним, потому что EIP — отдельный ресурс. Машина же новая: всё, что вы руками сделали на старой, пропало. Поэтому в IaC настройку описывают в коде, а не делают руками.
+
+### Часть 5. Дрейф, state и пересоздание с нуля (10 мин)
+```bash
+# Дрейф: в консоли cloud.ru переименуйте СВОЮ ВМ (например, в <prefix>-vm-renamed), затем:
+terraform plan                     # Terraform заметил расхождение и предлагает вернуть имя
 terraform apply
-terraform output public_ip
-```
-Terraform сам создаст `../ansible/inventory.ini` с IP машины.
 
-### Шаг 2. Docker на машине — Ansible
-```bash
-cd ../ansible
-ansible web -m ping
-ansible-playbook playbook.yml         # 1-й запуск: changed=N
-ansible-playbook playbook.yml         # 2-й запуск: changed=0 — это идемпотентность
-```
+terraform state list               # что Terraform считает «своим»
+terraform state show sbercloud_compute_instance.vm
 
-### Шаг 3. Наш стек на машине — Ansible
-```bash
-export POSTGRES_PASSWORD='придумайте-пароль-для-сервера'
-ansible-playbook deploy.yml           # копирует app/ и lesson09/, пишет .env, docker compose up
-curl http://<IP>/                     # тот же сервис, что был на ноутбуке, — теперь в облаке
-ansible-playbook deploy.yml           # второй раз: changed=0
-ansible-playbook deploy.yml -e app_version=v2    # выкатили «новую версию»
-curl http://<IP>/
+terraform destroy                  # удалить всё своё (общая сеть останется)
+terraform apply                    # и пересоздать с нуля одной командой — сила IaC
+terraform destroy                  # в конце занятия — обязательно (ресурсы стоят денег)
 ```
-> Имя образа ОС и пользователь по умолчанию (`root`/`ubuntu`) зависят от облака — сверьтесь с консолью.
 
 ### Задания для тех, кто закончил раньше
-1. Поменяйте размер диска в `variables.tf` и посмотрите, что покажет `terraform plan`: изменение на месте или пересоздание?
-2. Руками в консоли cloud.ru добавьте правило в группу безопасности и найдите его через `terraform plan` (drift).
-3. Спрячьте пароль в Ansible Vault: `ansible-vault create secrets.yml` и подключите через `vars_files`.
-4. Сделайте `--scale` через Ansible: добавьте в задачу `docker_compose_v2` параметр `scale: { backend: 3 }`.
+1. **Короткое имя для SSH.** Добавьте в `~/.ssh/config` блок `Host hse-vm` с `HostName <IP>`, `User root` и `IdentityFile ~/.ssh/id_ed25519`. После этого вход выполняется командой `ssh hse-vm`.
+2. **Диск.** Поставьте `vm_disk_size = 30` → `plan` покажет изменение на месте (`~`). После `apply` проверьте `df -h /` на ВМ. Потом попробуйте вернуть 20 и прочитайте ошибку: уменьшать диск нельзя.
+3. **Пустите соседа.** Добавьте его публичный ключ в `~/.ssh/authorized_keys` на своей ВМ и проверьте, что он может войти. Затем обсудите: увидит ли это изменение `terraform plan`? Почему нет? Что станет с этим ключом после пересоздания ВМ?
+4. **`terraform console`.** Посчитайте в нём `cidrhost("192.168.8.0/22", 10)`, `upper(var.prefix)`, `data.sbercloud_compute_flavors.vm.ids`.
 
 ---
 
 ## Занятие 11. CI: проверяем и собираем образ автоматически
+
+> ⚠️ Материалы занятий 11–12 (CI/CD) ещё обновляются под новую программу — инструкции ниже могут измениться.
 
 Продолжение занятия 10: сейчас образ бэкенда собирается прямо на сервере — долго, без тестов, и непонятно, какая версия где работает. Переносим сборку в GitHub Actions: каждый push проверяется, а из `main` собирается образ с тегом коммита и кладётся в GHCR.
 
@@ -533,12 +604,21 @@ for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы и
 | `pull` висит на `Waiting` на всех слоях сразу, даже после перезапуска | Остались процессы `docker pull`, остановленные через Ctrl+Z, и недокачанные куски | `pkill -9 -f "docker pull"`; `sudo systemctl stop docker docker.socket containerd`; `sudo rm -rf /var/lib/containerd/io.containerd.content.v1.content/ingest/*`; `sudo systemctl start containerd docker` |
 | `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
 | `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
-| Ansible: `UNREACHABLE` | ВМ ещё грузится / не тот пользователь / закрыт порт 22 | Подождать 1–2 мин, проверить `ansible_user` |
+| `No valid credential sources found` | Нет `SBC_ACCESS_KEY` / `SBC_SECRET_KEY` в этом окне терминала | `export …` в том же окне |
+| `Invalid value for variable` (prefix) | Префикс с заглавными/кириллицей/пробелом | Только строчная латиница, цифры, дефис: `ivanov` |
+| `Invalid reference … TODO_…` | Задание шага не выполнено | Замените TODO по подсказке в комментарии файла |
+| `no such file` в `file(pathexpand(…))` | Нет SSH-ключа | `ssh-keygen -t ed25519` |
+| `Your query returned no results` (образ / VPC) | Другое имя образа или сеть курса не создана | Спросить преподавателя; `image_name_regex`, `vpc_name` в tfvars |
+| `already exists` / `name … is duplicated` | Такой префикс уже занят другим студентом | Взять другой префикс (например, `ivanov2`) |
+| `quota` / `Insufficient …` | Кончились квоты общего проекта | Сказать преподавателю, работать в паре |
+| `ssh: Connection timed out` | ВМ ещё грузится / правило SSH не с вашего IP | Подождать 1–2 мин; проверить `allowed_ssh_cidr` и `curl -s ifconfig.me` |
+| `Permission denied (publickey)` | Не тот ключ / не тот пользователь | `ssh -i ~/.ssh/id_ed25519 root@<IP>`; ключ из шага 3 должен быть ваш |
+| `REMOTE HOST IDENTIFICATION HAS CHANGED` | ВМ пересоздана на том же IP | `ssh-keygen -R <IP>` |
 | Job `deploy` — skipped | Нет переменной `DEPLOY_ENABLED=true` | Settings → Secrets and variables → Actions → **Variables** |
 
 ## Не забудьте
 
 После окончания курса удалите облачные ресурсы — они тарифицируются, пока существуют:
 ```bash
-cd lesson10/terraform && terraform destroy
+cd lesson10/practice && terraform destroy
 ```
