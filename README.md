@@ -98,7 +98,7 @@ pipx ensurepath && pipx install git-filter-repo
 ```
 Docker и Docker Compose — см. раздел [Docker в Ubuntu](#docker-и-docker-compose-в-ubuntu-вм-virtualbox) ниже.
 
-Terraform — см. раздел [Terraform](#terraform-для-всех) ниже (версия **linux_amd64**). SSH-ключ для GitHub создавайте **внутри ВМ**.
+Terraform — см. раздел [Terraform](#terraform-для-всех) ниже (ставится внутрь ВМ). SSH-ключ для GitHub создавайте **внутри ВМ**.
 
 > **В браузере Windows** сервисы ВМ открываются по проброшенным портам: `http://localhost:8000`, nginx — `http://localhost:8080`.
 > **Если ВМ не стартует** с ошибкой про VT-x/AMD-V — включите виртуализацию в BIOS. Если VirtualBox работает очень медленно (черепаха в строке состояния) — отключите Hyper-V: PowerShell от администратора `bcdedit /set hypervisorlaunchtype off` и перезагрузка (Docker Desktop и WSL после этого работать не будут — для курса они не нужны).
@@ -110,7 +110,7 @@ Terraform — см. раздел [Terraform](#terraform-для-всех) ниж�
 brew install git ansible git-filter-repo
 ```
 Docker и Docker Compose — см. раздел [Docker на macOS](#docker-и-docker-compose-на-macos) ниже.
-Terraform — см. следующий раздел (версия **darwin_arm64** для Mac на M1–M4, **darwin_amd64** для Intel).
+Terraform — см. раздел [Terraform](#terraform-для-всех) ниже (команды сами выберут **darwin_arm64** для Mac на M1–M4 или **darwin_amd64** для Intel).
 
 ### Docker и Docker Compose в Ubuntu (ВМ VirtualBox)
 
@@ -249,28 +249,107 @@ docker tag  dh-mirror.gitverse.ru/zricethezav/gitleaks:latest zricethezav/gitlea
 
 ### Terraform (для всех)
 
-Сайт HashiCorp и реестр Terraform из России недоступны, поэтому используем **зеркало cloud.ru**.
+Terraform нужен на занятии 10. Поставьте его **заранее, дома**: на занятии на это не будет времени.
 
-1. Скачайте архив для своей платформы: https://tf-mirror-distr.obs-website.ru-moscow-1.hc.sbercloud.ru/
-2. Распакуйте и положите бинарник в PATH:
+> Сайт HashiCorp (releases.hashicorp.com) и реестр Terraform из России не открываются. Поэтому и сам Terraform, и плагины (провайдеры) мы берём с **зеркала cloud.ru**. Команды `brew install terraform` и `apt install terraform` тоже не сработают: они качают с тех же заблокированных адресов.
+
+Установка — три шага: **1)** скачать и установить Terraform, **2)** настроить `~/.terraformrc`, чтобы провайдеры качались с зеркала, **3)** проверить.
+
+#### Шаг 1. Установить Terraform
+
+**Windows → внутри ВМ VirtualBox (Ubuntu Server).** Terraform ставим в ВМ, а не в Windows: там же у вас Docker и SSH-ключ. Команды выполняйте в ВМ (по SSH из Windows или прямо в окне VirtualBox):
+```bash
+sudo apt update && sudo apt install -y curl unzip
+
+TF_VER=1.15.7                              # версия Terraform (список: см. ниже)
+ARCH=$(dpkg --print-architecture)          # обычно amd64
+curl -fLo /tmp/terraform.zip \
+  "https://tf-mirror-distr.obs-website.ru-moscow-1.hc.sbercloud.ru/terraform/${TF_VER}/terraform_${TF_VER}_linux_${ARCH}.zip"
+sudo unzip -o /tmp/terraform.zip terraform -d /usr/local/bin/
+rm /tmp/terraform.zip
+
+terraform -version                         # Terraform v1.15.7 on linux_amd64
+```
+
+**macOS** (в «Терминале»):
+```bash
+TF_VER=1.15.7
+ARCH=$(uname -m); [ "$ARCH" = "x86_64" ] && ARCH=amd64   # arm64 — Apple M1…M4, amd64 — Intel
+curl -fLo /tmp/terraform.zip \
+  "https://tf-mirror-distr.obs-website.ru-moscow-1.hc.sbercloud.ru/terraform/${TF_VER}/terraform_${TF_VER}_darwin_${ARCH}.zip"
+sudo mkdir -p /usr/local/bin
+sudo unzip -o /tmp/terraform.zip terraform -d /usr/local/bin/
+rm /tmp/terraform.zip
+
+terraform -version                         # Terraform v1.15.7 on darwin_arm64
+```
+> `sudo` спросит пароль от вашего компьютера. Символы при вводе не отображаются — так и должно быть.
+
+**Если `curl` выдал ошибку 404**, такой версии на зеркале нет. Откройте в браузере https://tf-mirror-distr.obs-website.ru-moscow-1.hc.sbercloud.ru/terraform/, выберите любую версию **1.x без** `alpha`, `beta`, `rc` и подставьте её номер в `TF_VER`. Подойдёт любая версия от 1.5 и новее.
+
+<details>
+<summary>Без командной строки: скачать архив в браузере</summary>
+
+1. Откройте https://tf-mirror-distr.obs-website.ru-moscow-1.hc.sbercloud.ru/terraform/ и выберите версию.
+2. Скачайте архив для своей системы:
+   - Ubuntu (ВМ VirtualBox): `terraform_<версия>_linux_amd64.zip`
+   - Mac с процессором Apple (M1…M4): `terraform_<версия>_darwin_arm64.zip`
+   - Mac с процессором Intel: `terraform_<версия>_darwin_amd64.zip`
+   Какой у вас процессор, видно в меню  → «Об этом Mac»: «Chip Apple M…» или «Processor … Intel».
+3. Распакуйте архив и переместите файл `terraform` в `/usr/local/bin/`:
    ```bash
-   unzip terraform_*.zip
-   sudo mv terraform /usr/local/bin/
-   terraform -version
+   sudo mkdir -p /usr/local/bin && sudo mv ~/Downloads/terraform /usr/local/bin/
    ```
-   > macOS может заблокировать запуск скачанного файла: `xattr -d com.apple.quarantine /usr/local/bin/terraform`
-3. Создайте файл `~/.terraformrc`, чтобы провайдеры тоже качались с зеркала:
-   ```hcl
-   provider_installation {
-     network_mirror {
-       url     = "https://terraform.cloud.ru/"
-       include = ["registry.terraform.io/*/*"]
-     }
-     direct {
-       exclude = ["registry.terraform.io/*/*"]
-     }
-   }
+4. macOS заблокирует запуск файла, скачанного браузером («не удаётся проверить разработчика»). Снимите блокировку:
+   ```bash
+   sudo xattr -d com.apple.quarantine /usr/local/bin/terraform
    ```
+</details>
+
+#### Шаг 2. Провайдеры — тоже с зеркала: `~/.terraformrc`
+
+Без этого файла команда `terraform init` на занятии не сможет скачать провайдер cloud.ru. Скопируйте блок целиком и выполните (на Windows — в ВМ):
+```bash
+cat > ~/.terraformrc <<'EOF'
+provider_installation {
+  network_mirror {
+    url     = "https://terraform.cloud.ru/"
+    include = ["registry.terraform.io/*/*"]
+  }
+  direct {
+    exclude = ["registry.terraform.io/*/*"]
+  }
+}
+EOF
+cat ~/.terraformrc        # проверьте, что файл записался
+```
+
+#### Шаг 3. Проверка: Terraform скачивает провайдер cloud.ru
+```bash
+mkdir -p /tmp/tf-check && cd /tmp/tf-check
+cat > main.tf <<'EOF'
+terraform {
+  required_providers {
+    sbercloud = {
+      source = "sbercloud-terraform/sbercloud"
+    }
+  }
+}
+EOF
+terraform init            # ждём: "Terraform has been successfully initialized!"
+cd ~ && rm -rf /tmp/tf-check
+```
+Увидели `successfully initialized` — Terraform готов к занятию. Облачные ключи для этой проверки не нужны: она только скачивает провайдер.
+
+| Ошибка | Что значит | Что делать |
+|---|---|---|
+| `curl: (22) … 404` | Нет такой версии на зеркале | Выбрать версию на странице зеркала и поменять `TF_VER` |
+| `terraform: command not found` | Файл не попал в `/usr/local/bin` | Повторить `sudo unzip …`; проверить `ls -l /usr/local/bin/terraform` |
+| `cannot execute binary file` / `bad CPU type` | Скачан архив не для вашего процессора | Mac M1…M4 — `darwin_arm64`, Intel — `darwin_amd64`, ВМ — `linux_amd64` |
+| `unzip: command not found` | Не установлен unzip | `sudo apt install -y unzip` |
+| `Failed to query available provider packages` / `could not connect to registry.terraform.io` | Нет `~/.terraformrc` или опечатка в нём | Повторить шаг 2 и сравнить файл с примером |
+| `… cannot be opened because the developer cannot be verified` (macOS) | Карантин для файлов из браузера | `sudo xattr -d com.apple.quarantine /usr/local/bin/terraform` |
+| Таймаут при `curl` или `init` | Мешает VPN или прокси | Выключить VPN и повторить |
 
 ### Git, GitHub и SSH-ключ (для всех)
 
@@ -292,7 +371,7 @@ bash scripts/pull-images.sh
 ### Финальная проверка
 
 ```bash
-docker compose version && git --version && terraform -version && ansible --version && git filter-repo --version
+docker compose version && git --version && terraform -version && git filter-repo --version
 git clone https://github.com/tenroman1-design/devops-lab.git && cd devops-lab
 bash scripts/pull-images.sh
 ```
