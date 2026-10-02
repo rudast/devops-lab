@@ -1,41 +1,41 @@
-# ---------- Данные (data sources): читаем, а не создаём ----------
+# Занятие 10 — ГОТОВОЕ РЕШЕНИЕ: так выглядит папка practice после шагов 1–5 (файлы steps/ собраны вместе).
+
+# ---------- Data sources: читаем образ, тип ВМ и общую сеть курса ----------
 data "sbercloud_availability_zones" "zones" {}
 
+# Свежий публичный образ Ubuntu
 data "sbercloud_images_image" "ubuntu" {
-  name        = var.image_name
+  name_regex  = var.image_name_regex
   visibility  = "public"
   most_recent = true
 }
 
-data "sbercloud_compute_flavors" "small" {
+# Тип ВМ (flavor) с нужным числом vCPU и памяти
+data "sbercloud_compute_flavors" "vm" {
   availability_zone = data.sbercloud_availability_zones.zones.names[0]
   performance_type  = "normal"
-  cpu_core_count    = 2
-  memory_size       = 4
+  cpu_core_count    = var.vm_cpu
+  memory_size       = var.vm_ram
 }
 
-# ---------- Сеть ----------
-resource "sbercloud_vpc" "vpc" {
-  name = "${var.prefix}-vpc"
-  cidr = "192.168.0.0/16"
+# Общая сеть курса — её создал преподаватель (lesson10/shared)
+data "sbercloud_vpc" "course" {
+  name = var.vpc_name
 }
 
-resource "sbercloud_vpc_subnet" "subnet" {
-  name              = "${var.prefix}-subnet"
-  cidr              = "192.168.10.0/24"
-  gateway_ip        = "192.168.10.1"
-  vpc_id            = sbercloud_vpc.vpc.id
-  availability_zone = data.sbercloud_availability_zones.zones.names[0]
+data "sbercloud_vpc_subnet" "course" {
+  name   = var.subnet_name
+  vpc_id = data.sbercloud_vpc.course.id
 }
 
-# ---------- Firewall (security group) ----------
-resource "sbercloud_networking_secgroup" "web" {
+# ---------- Группа безопасности: SSH (22) и HTTP (80) ----------
+resource "sbercloud_networking_secgroup" "vm" {
   name        = "${var.prefix}-sg"
-  description = "SSH + HTTP + HTTPS"
+  description = "Lesson 10: ${var.prefix}"
 }
 
 resource "sbercloud_networking_secgroup_rule" "ssh" {
-  security_group_id = sbercloud_networking_secgroup.web.id
+  security_group_id = sbercloud_networking_secgroup.vm.id
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
@@ -45,7 +45,7 @@ resource "sbercloud_networking_secgroup_rule" "ssh" {
 }
 
 resource "sbercloud_networking_secgroup_rule" "http" {
-  security_group_id = sbercloud_networking_secgroup.web.id
+  security_group_id = sbercloud_networking_secgroup.vm.id
   direction         = "ingress"
   ethertype         = "IPv4"
   protocol          = "tcp"
@@ -54,44 +54,46 @@ resource "sbercloud_networking_secgroup_rule" "http" {
   remote_ip_prefix  = "0.0.0.0/0"
 }
 
-resource "sbercloud_networking_secgroup_rule" "https" {
-  security_group_id = sbercloud_networking_secgroup.web.id
-  direction         = "ingress"
-  ethertype         = "IPv4"
-  protocol          = "tcp"
-  port_range_min    = 443
-  port_range_max    = 443
-  remote_ip_prefix  = "0.0.0.0/0"
-}
-
-# ---------- SSH-ключ ----------
+# ---------- Публичный SSH-ключ студента ----------
 resource "sbercloud_kps_keypair" "key" {
   name       = "${var.prefix}-key"
   public_key = file(pathexpand(var.ssh_public_key_path))
 }
 
-# ---------- Виртуальная машина ----------
+
+# ---------- ВМ, публичный IP и их связка ----------
 resource "sbercloud_compute_instance" "vm" {
   name               = "${var.prefix}-vm"
   image_id           = data.sbercloud_images_image.ubuntu.id
-  flavor_id          = data.sbercloud_compute_flavors.small.ids[0]
+  flavor_id          = data.sbercloud_compute_flavors.vm.ids[0]
   availability_zone  = data.sbercloud_availability_zones.zones.names[0]
-  security_group_ids = [sbercloud_networking_secgroup.web.id]
+  security_group_ids = [sbercloud_networking_secgroup.vm.id]
   key_pair           = sbercloud_kps_keypair.key.name
 
+  # cloud-init: ставит nginx при ПЕРВОМ запуске. Изменение user_data = пересоздание ВМ (-/+)
+  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", { prefix = var.prefix })
+
   system_disk_type = "SAS"
-  system_disk_size = 20
+  system_disk_size = var.vm_disk_size
 
   network {
-    uuid = sbercloud_vpc_subnet.subnet.id
+    uuid = data.sbercloud_vpc_subnet.course.id
+  }
+
+  tags = {
+    course = "hse-devops"
+    owner  = var.prefix
   }
 }
 
-# ---------- Публичный IP ----------
+# Публичный IP — ОТДЕЛЬНЫЙ ресурс: он переживёт пересоздание ВМ
 resource "sbercloud_vpc_eip" "ip" {
+  name = "${var.prefix}-eip"
+
   publicip {
     type = "5_bgp"
   }
+
   bandwidth {
     name        = "${var.prefix}-bw"
     share_type  = "PER"
@@ -103,13 +105,4 @@ resource "sbercloud_vpc_eip" "ip" {
 resource "sbercloud_compute_eip_associate" "ip_to_vm" {
   public_ip   = sbercloud_vpc_eip.ip.address
   instance_id = sbercloud_compute_instance.vm.id
-}
-
-# ---------- Мост к Ansible: генерируем inventory ----------
-resource "local_file" "ansible_inventory" {
-  filename = "${path.module}/../ansible/inventory.ini"
-  content  = <<-EOT
-    [web]
-    ${sbercloud_vpc_eip.ip.address} ansible_user=root
-  EOT
 }

@@ -5,24 +5,59 @@ variable "region" {
 }
 
 variable "prefix" {
-  description = "Префикс имён ресурсов (например, фамилия студента)"
+  description = "Ваш префикс — фамилия латиницей. Все ресурсы в общем проекте называются <prefix>-…"
   type        = string
+
+  validation {
+    condition     = can(regex("^[a-z][a-z0-9-]{2,20}$", var.prefix))
+    error_message = "prefix: 3–21 символ, строчные латинские буквы, цифры и дефис, начинается с буквы. Например: ivanov."
+  }
 }
 
-variable "image_name" {
-  description = "Точное имя публичного образа ОС (проверьте в консоли: ECS → Images)"
+variable "vpc_name" {
+  description = "Общая сеть курса (её заранее создал преподаватель, см. lesson10/shared)"
   type        = string
-  default     = "Ubuntu 22.04 server 64bit"
+  default     = "devops-course-vpc"
+}
+
+variable "subnet_name" {
+  description = "Общая подсеть курса"
+  type        = string
+  default     = "devops-course-subnet"
+}
+
+variable "image_name_regex" {
+  description = "Шаблон имени публичного образа ОС"
+  type        = string
+  default     = "^Ubuntu 22.04 server 64bit"
+}
+
+variable "vm_cpu" {
+  description = "Число vCPU"
+  type        = number
+  default     = 2
+}
+
+variable "vm_ram" {
+  description = "Память, ГБ"
+  type        = number
+  default     = 4
+}
+
+variable "vm_disk_size" {
+  description = "Размер системного диска, ГБ"
+  type        = number
+  default     = 20
 }
 
 variable "ssh_public_key_path" {
-  description = "Путь к публичному SSH-ключу"
+  description = "Путь к ВАШЕМУ публичному SSH-ключу (.pub!)"
   type        = string
   default     = "~/.ssh/id_ed25519.pub"
 }
 
 variable "allowed_ssh_cidr" {
-  description = "С какого адреса разрешён SSH (лучше свой IP/32)"
+  description = "С каких адресов разрешён SSH. 0.0.0.0/0 — отовсюду; лучше свой IP/32"
   type        = string
   default     = "0.0.0.0/0"
 }

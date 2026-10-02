@@ -1,0 +1,13 @@
+#cloud-config
+# Выполняется ОДИН раз — при первом запуске ВМ. Terraform передаёт его через user_data.
+package_update: true
+packages:
+  - nginx
+write_files:
+  - path: /var/www/html/index.html
+    content: |
+      <meta charset="utf-8">
+      <h1>Привет! Эту ВМ создал ${prefix} с помощью Terraform</h1>
+      <p>Курс DevOps, НИУ ВШЭ, занятие 10</p>
+runcmd:
+  - systemctl enable --now nginx
