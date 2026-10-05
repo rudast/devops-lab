@@ -29,7 +29,7 @@ variable "subnet_name" {
 variable "image_name_regex" {
   description = "Шаблон имени публичного образа ОС"
   type        = string
-  default     = "^Ubuntu 22.04 server 64bit"
+  default     = "^Ubuntu 22.04 server 64bit$"   # $ — без GPU-образов «… with Grid Driver»
 }
 
 variable "vm_cpu" {
