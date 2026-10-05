@@ -14,6 +14,7 @@ data "sbercloud_images_image" "ubuntu" {
 data "sbercloud_compute_flavors" "vm" {
   availability_zone = data.sbercloud_availability_zones.zones.names[0]
   performance_type  = "normal"
+  generation        = var.vm_generation
   cpu_core_count    = var.vm_cpu
   memory_size       = var.vm_ram
 }
@@ -69,7 +70,7 @@ resource "sbercloud_compute_instance" "vm" {
   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", { prefix = var.prefix })
 
   system_disk_type = "SAS"
-  system_disk_size = var.vm_disk_size
+  system_disk_size = max(var.vm_disk_size, data.sbercloud_images_image.ubuntu.min_disk_gb) # не меньше минимума образа
 
   network {
     uuid = data.sbercloud_vpc_subnet.course.id
