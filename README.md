@@ -1,6 +1,6 @@
 # devops-lab — учебный проект для модулей 3–4
 
-Сервис: **backend (Flask) + PostgreSQL + Redis**, дальше — **Nginx**, **CI/CD** и деплой в облако cloud.ru.
+Сервис: **backend (Flask) + PostgreSQL + Redis**, перед ним — **Nginx**, а на занятии 10 — своя ВМ в облаке cloud.ru через **Terraform**.
 
 | Эндпоинт | Что делает |
 |---|---|
@@ -13,30 +13,27 @@
 
 ## Содержание
 - [Подготовка ноутбука](#подготовка-ноутбука)
+  - [Windows → VirtualBox + Ubuntu Server](#windows--virtualbox--ubuntu-server)
   - [Docker в Ubuntu (VirtualBox)](#docker-и-docker-compose-в-ubuntu-вм-virtualbox)
   - [Docker на macOS](#docker-и-docker-compose-на-macos)
   - [Образы курса из GHCR](#образы-курса-из-нашего-реестра-ghcr)
-  - [Зеркала Docker Hub (запасной вариант)](#зеркала-docker-hub-запасной-вариант)
-- [Занятие 8. Docker Compose](#занятие-8-docker-compose)
-- [Занятие 9. Nginx перед бэкендом + конфигурация и секреты](#занятие-9-nginx-перед-бэкендом--конфигурация-и-секреты)
-- [Занятие 10. IaC: своя ВМ в cloud.ru через Terraform](#занятие-10-infrastructure-as-code-своя-вм-в-cloudru-через-terraform)
-- [Занятие 11. CI: проверяем и собираем образ](#занятие-11-ci-проверяем-и-собираем-образ-автоматически)
-- [Занятие 12. CD: деплой без рук](#занятие-12-cd-деплой-без-рук)
+  - [Terraform](#terraform-для-всех)
+- [Занятия 8–10: README, практика и домашние задания](#занятия)
 - [Если что-то не работает](#если-что-то-не-работает)
 
 ## Структура репозитория
 
 ```
 app/                      код, Dockerfile, тесты
-lesson08/                 docker-compose.yml с захардкоженными паролями (так делать НЕ надо)
-lesson09/                 + Nginx (reverse proxy) перед бэкендом, конфигурация в .env
-lesson10/practice/        занятие 10: ваша рабочая папка Terraform
+lesson08/                 занятие 8: docker-compose.yml (пароли захардкожены намеренно), README + ДЗ
+lesson09/                 занятие 9: + Nginx перед бэкендом, конфигурация в .env, README + ДЗ
+lesson10/README.md        занятие 10: подготовка, практика, ДЗ
+lesson10/practice/        ваша рабочая папка Terraform
 lesson10/steps/           шаги 01…05: data sources, firewall, SSH-ключ, ВМ + IP, nginx через cloud-init
 lesson10/terraform/       готовое решение занятия 10 (ответы)
 lesson10/shared/          общая сеть курса (запускает преподаватель)
 lesson10/ansible/         Ansible: Docker на ВМ и выкатка стека (понадобится позже)
-lesson12/                 production compose: бэкенд из GHCR, деплой из CI/CD
-.github/workflows/        CI/CD-пайплайн (занятия 11–12) и копирование образов в GHCR
+lesson12/, .github/        заготовки на будущее (в курсе пока не используются) и копирование образов в GHCR
 scripts/pull-images.sh    скачать образы курса из GHCR
 ```
 
@@ -48,8 +45,8 @@ scripts/pull-images.sh    скачать образы курса из GHCR
 
 | Инструмент | Зачем | Занятие |
 |---|---|---|
-| Docker + Docker Compose | запуск контейнеров | 8–12 |
-| Git + аккаунт GitHub + SSH-ключ | код, CI/CD | 8–12 |
+| Docker + Docker Compose | запуск контейнеров | 8–9 |
+| Git + аккаунт GitHub + SSH-ключ | код; SSH-ключ — вход на ВМ в облаке | 8–10 |
 | git-filter-repo | чистка истории от секретов | 9 |
 | Terraform | создание ВМ в облаке | 10 |
 | Ansible | настройка ВМ | позже |
@@ -379,297 +376,23 @@ bash scripts/pull-images.sh
 
 ---
 
-## Занятие 8. Docker Compose
+## Занятия
 
-```bash
-cd lesson08
-docker compose up -d --build          # собрать и запустить
-docker compose ps                     # все сервисы healthy?
-curl localhost:8000/health            # {"status": {"postgres":"ok","redis":"ok"}}
-curl localhost:8000/hits              # счётчик растёт
-curl -X POST -H 'Content-Type: application/json' -d '{"text":"hello"}' localhost:8000/notes
-```
+У каждого занятия свой README: подготовка к занятию, шаги практики, частые ошибки и **домашнее задание**.
 
-**Сеть.** Сервисы видят друг друга по имени сервиса:
-```bash
-docker compose exec backend python -c "import socket; print(socket.gethostbyname('db'))"
-docker network ls                     # сеть lesson08_backend-net
-docker network inspect lesson08_backend-net
-```
-
-**Тома.** Данные переживают пересоздание контейнера:
-```bash
-docker compose down                   # контейнеры удалены, том остался
-docker compose up -d
-curl localhost:8000/notes             # заметка на месте
-docker volume ls                      # lesson08_pgdata
-docker compose down -v                # -v удалит и том (данные пропадут!)
-```
-
-**Масштабирование.**
-```bash
-docker compose up -d --scale backend=3
-docker compose ps                     # 3 бэкенда, каждый получил свой порт из 8000–8005
-curl localhost:8000/hits; curl localhost:8001/hits; curl localhost:8002/hits   # разные served_by, общий счётчик в Redis
-```
-Попробуйте заменить `"8000-8005:8000"` на `"8000:8000"` и снова `--scale backend=3` — увидите ошибку *port is already allocated*. Почему? Как это решит Nginx — на занятии 9.
-
----
-
-## Занятие 9. Nginx перед бэкендом + конфигурация и секреты
-
-Продолжаем стек занятия 8. Проблема, на которой мы остановились: при `--scale backend=3` каждой копии нужен свой порт на хосте, и пользователю непонятно, куда стучаться. Решение — **reverse proxy**: наружу открыт только Nginx, а он сам раздаёт запросы копиям бэкенда. Заодно убираем пароли из compose-файла в `.env`.
-
-```
-браузер ──:80──▶ nginx ──▶ backend ×N ──▶ postgres, redis
-                 (frontend-net)        (backend-net)
-```
-
-### Часть 1. Reverse proxy (40 мин)
-```bash
-cd lesson09
-docker compose -f ../lesson08/docker-compose.yml down     # погасить стек занятия 8, чтобы освободить порты
-cp .env.example .env                                     # впишите свой пароль (подробнее — в части 2)
-docker compose up -d --build
-docker compose ps                     # опубликован только порт nginx (80 -> 80)
-curl localhost/                       # ответил backend через nginx
-curl localhost/nginx-health           # ответил сам nginx
-```
-> Порт 80 занят или нет прав? В `.env` поставьте `HTTP_PORT=8080` и обращайтесь к `localhost:8080`.
-> Windows/VirtualBox: в браузере Windows — `http://localhost:8080` (проброс 8080 → 80 из подготовки).
-
-**Масштабирование без конфликта портов:**
-```bash
-docker compose up -d --scale backend=3
-sleep 5                               # nginx перечитывает DNS каждые 5 с (resolve в nginx.conf)
-for i in $(seq 6); do curl -s localhost/hits; echo; done   # served_by чередуется, счётчик общий
-```
-
-**Отказоустойчивость:**
-```bash
-docker compose logs -f nginx          # в другом окне: журнал запросов
-docker stop devops-lab-backend-1      # «уронили» одну копию
-for i in $(seq 6); do curl -s localhost/hits; echo; done   # отвечают оставшиеся
-docker compose stop backend           # уронили все
-curl -i localhost/                    # 502 Bad Gateway — nginx жив, а за ним никого
-docker compose up -d --scale backend=3
-```
-
-**Что посмотреть в `nginx/nginx.conf`:** `upstream` с одной строкой `server backend:8000 resolve` (почему одной — объяснено в комментариях), `proxy_pass`, заголовки `X-Forwarded-*`, `location = /nginx-health`.
-
-### Часть 2. Конфигурация и секреты (40 мин)
-```bash
-rm .env
-docker compose config                 # ошибка: required variable POSTGRES_USER is missing
-cp .env.example .env                  # впишите свой пароль
-docker compose config                 # видно, какие значения подставились
-# поменяйте в .env APP_VERSION=v2 и перезапустите — версия сменится без правки кода:
-docker compose up -d
-curl localhost/
-```
-
-#### Эмуляция утечки секрета (делать в ОТДЕЛЬНОЙ папке!)
-```bash
-mkdir /tmp/leak-demo && cd /tmp/leak-demo && git init
-echo "POSTGRES_PASSWORD=Sup3rS3cret" > .env
-git add .env && git commit -m "add config"        # ошибка!
-
-# «Удаляем» — но это не помогает:
-git rm --cached .env && echo ".env" > .gitignore
-git add .gitignore && git commit -m "remove .env"
-git log -p --all -S "Sup3rS3cret"                  # пароль всё ещё в истории
-
-# Находим сканером:
-docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo -v
-
-# Переписываем историю:
-git filter-repo --invert-paths --path .env --force
-git log -p --all -S "Sup3rS3cret"                  # пусто
-```
-Главное правило: **если секрет попал в удалённый репозиторий — считаем его скомпрометированным и меняем (ротация)**. Переписывание истории — вторично.
-
-### Задания для тех, кто закончил раньше
-1. Добавьте в `nginx.conf` свою страницу для 502: `error_page 502 /502.html;` и `location = /502.html { return 502 "Сервис перезапускается, обновите страницу через минуту\n"; }`.
-2. Ограничьте частоту запросов: `limit_req_zone $binary_remote_addr zone=one:10m rate=5r/s;` (в начале файла) и `limit_req zone=one burst=10;` в `location /`. Проверьте: `for i in $(seq 50); do curl -s -o /dev/null -w "%{http_code} " localhost/; done`.
-3. Включите сжатие: `gzip on; gzip_types application/json;` и сравните `curl -sI -H 'Accept-Encoding: gzip' localhost/notes`.
-4. Переведите пароль Postgres на Docker secrets: `POSTGRES_PASSWORD_FILE` + раздел `secrets:` в compose.
-
----
-
-## Занятие 10. Infrastructure as Code: своя ВМ в cloud.ru через Terraform
-
-На занятиях 8–9 стек жил на ноутбуке. Сегодня мы своими руками описываем в коде виртуальную машину в облаке, создаём её Terraform'ом, кладём на неё свой SSH-ключ и подключаемся. Затем меняем инфраструктуру и учимся читать план: что изменится на месте, а что будет пересоздано.
-
-**Как устроено:** все работают в **одном общем проекте** cloud.ru. Ключи доступа выдаёт преподаватель. Сеть (VPC и подсеть) уже создана заранее, папка `lesson10/shared`. Каждый создаёт свои ресурсы с префиксом — своей фамилией: `ivanov-vm`, `ivanov-sg`, `ivanov-key`, `ivanov-eip`.
-
-> ⚠️ В общем проекте видны ресурсы всех студентов. **Трогайте только свои** (с вашим префиксом). Terraform удаляет лишь то, что записано в **вашем** state.
-
-```
-lesson10/
-  practice/   ← здесь работаете вы: стартовые versions.tf, variables.tf
-  steps/      ← файлы шагов 01…05: копируете в practice по одному
-  terraform/  ← готовое решение (ответы) — подглядывайте, если застряли
-  shared/     ← общая сеть курса (запускает только преподаватель)
-```
-
-Перед занятием: Terraform и `~/.terraformrc` с зеркалом (см. [подготовку](#terraform-для-всех)) и SSH-ключ `~/.ssh/id_ed25519` (см. [Git, GitHub и SSH-ключ](#git-github-и-ssh-ключ-для-всех)). Студентам на Windows всё нужно делать **внутри ВМ VirtualBox**.
-
-### Часть 1. Подготовка (10 мин)
-```bash
-cd devops-lab/lesson10/practice
-export SBC_ACCESS_KEY="…"  SBC_SECRET_KEY="…"   # выдаст преподаватель. НЕ в файлы, НЕ в Git
-ls ~/.ssh/id_ed25519.pub || ssh-keygen -t ed25519   # нет ключа — создайте (Enter на все вопросы)
-cp terraform.tfvars.example terraform.tfvars        # впишите prefix = "вашафамилия"
-terraform init          # скачает провайдер sbercloud с зеркала
-terraform validate      # синтаксис в порядке?
-terraform plan          # пока: No changes — в папке ещё нет ресурсов
-```
-> Переменные `SBC_*` живут только в текущем окне терминала: в новом окне сделайте `export` заново.
-
-### Часть 2. Собираем ВМ по шагам (25 мин)
-Каждый шаг выполняется одинаково: скопировать файл, прочитать его, выполнить **задание** внутри (если есть), затем `terraform plan` → прочитать план → `terraform apply`.
-
-| Шаг | Файл | Что создаём | В плане | Задание |
-|---|---|---|---|---|
-| 1 | `01-data.tf` | ничего — **читаем** образ Ubuntu, тип ВМ, общую сеть | `0 to add`, outputs | — |
-| 2 | `02-firewall.tf` | группа безопасности + правило SSH | `2 to add` | впишите порт SSH вместо `TODO_PORT` |
-| 3 | `03-keypair.tf` | ваш **публичный** ключ в облаке | `1 to add` | сошлитесь на переменную с путём к ключу |
-| 4 | `04-vm.tf` | ВМ + публичный IP + их связка | `3 to add` | сошлитесь на имя ключа из шага 3 |
-
-```bash
-cp ../steps/01-data.tf .
-terraform plan && terraform apply
-# … и так далее: 02, 03, 04
-terraform output                      # все выходные значения
-```
-> Ошибка `Invalid reference … TODO_…` означает, что задание шага ещё не выполнено. Прочитайте сообщение: Terraform показывает файл и строку.
-> На шаге 3 сравните отпечатки: `terraform output key_fingerprint` и `ssh-keygen -lf ~/.ssh/id_ed25519.pub`.
-
-### Часть 3. Подключаемся к ВМ (15 мин)
-ВМ загружается 1–2 минуты после `apply`.
-```bash
-ssh root@$(terraform output -raw public_ip)
-# первый вход: "Are you sure you want to continue connecting?" → yes (отпечаток сервера сохранится в ~/.ssh/known_hosts)
-```
-На ВМ осмотритесь:
-```bash
-hostname                        # ваша-фамилия-vm
-cat ~/.ssh/authorized_keys      # ваш публичный ключ — сравните с cat ~/.ssh/id_ed25519.pub на ноутбуке
-ip -4 addr                      # внутренний адрес 192.168.x.x — а заходили вы по публичному (EIP)
-nproc; free -h; df -h /         # сколько ресурсов описали в коде — столько и получили
-exit
-```
-Проверьте, что вход **только по ключу**:
-```bash
-ssh -o PubkeyAuthentication=no root@<IP>    # Permission denied — пароля нет, и это правильно
-```
-
-### Часть 4. Меняем инфраструктуру и читаем план (20 мин)
-1. **Изменение на месте (`~`).** В `04-vm.tf` добавьте тег `lesson = "10"` в `tags` → `terraform plan`: `~ update in-place` → `apply`.
-2. **Пересоздание правила (`-/+`).** Закройте SSH для всех, кроме себя. Узнайте свой IP: `curl -s ifconfig.me`. В `terraform.tfvars` пропишите `allowed_ssh_cidr = "<IP>/32"`. Выполните `terraform plan`: правило будет `-/+ must be replaced`, ищите в плане `# forces replacement`. Затем `apply` и проверьте, что `ssh` по-прежнему работает.
-3. **Пересоздание ВМ с cloud-init.** Ставим nginx при старте машины:
-   ```bash
-   cp ../steps/05-http.tf ../steps/cloud-init.yaml.tftpl .
-   ```
-   В `04-vm.tf` внутрь ресурса `sbercloud_compute_instance.vm` добавьте:
-   ```hcl
-   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", { prefix = var.prefix })
-   ```
-   ```bash
-   terraform fmt                 # выровнять код
-   terraform plan                # ВМ: -/+ (user_data forces replacement), правило HTTP: + create, EIP — без изменений!
-   terraform apply
-   curl http://$(terraform output -raw public_ip)/      # «Привет! Эту ВМ создал …» (через 1–2 мин после apply)
-   ssh root@$(terraform output -raw public_ip)          # WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!
-   ssh-keygen -R $(terraform output -raw public_ip)     # это новая ВМ с новым ключом сервера — забываем старый
-   ```
-   > IP остался прежним, потому что EIP — отдельный ресурс. Машина же новая: всё, что вы руками сделали на старой, пропало. Поэтому в IaC настройку описывают в коде, а не делают руками.
-
-### Часть 5. Дрейф, state и пересоздание с нуля (10 мин)
-```bash
-# Дрейф: в консоли cloud.ru переименуйте СВОЮ ВМ (например, в <prefix>-vm-renamed), затем:
-terraform plan                     # Terraform заметил расхождение и предлагает вернуть имя
-terraform apply
-
-terraform state list               # что Terraform считает «своим»
-terraform state show sbercloud_compute_instance.vm
-
-terraform destroy                  # удалить всё своё (общая сеть останется)
-terraform apply                    # и пересоздать с нуля одной командой — сила IaC
-terraform destroy                  # в конце занятия — обязательно (ресурсы стоят денег)
-```
-
-### Задания для тех, кто закончил раньше
-1. **Короткое имя для SSH.** Добавьте в `~/.ssh/config` блок `Host hse-vm` с `HostName <IP>`, `User root` и `IdentityFile ~/.ssh/id_ed25519`. После этого вход выполняется командой `ssh hse-vm`.
-2. **Диск.** Поставьте `vm_disk_size = 30` → `plan` покажет изменение на месте (`~`). После `apply` проверьте `df -h /` на ВМ. Потом попробуйте вернуть 20 и прочитайте ошибку: уменьшать диск нельзя.
-3. **Пустите соседа.** Добавьте его публичный ключ в `~/.ssh/authorized_keys` на своей ВМ и проверьте, что он может войти. Затем обсудите: увидит ли это изменение `terraform plan`? Почему нет? Что станет с этим ключом после пересоздания ВМ?
-4. **`terraform console`.** Посчитайте в нём `cidrhost("192.168.8.0/22", 10)`, `upper(var.prefix)`, `data.sbercloud_compute_flavors.vm.ids`.
-
----
-
-## Занятие 11. CI: проверяем и собираем образ автоматически
-
-> ⚠️ Материалы занятий 11–12 (CI/CD) ещё обновляются под новую программу — инструкции ниже могут измениться.
-
-Продолжение занятия 10: сейчас образ бэкенда собирается прямо на сервере — долго, без тестов, и непонятно, какая версия где работает. Переносим сборку в GitHub Actions: каждый push проверяется, а из `main` собирается образ с тегом коммита и кладётся в GHCR.
-
-1. Сделайте **Fork** этого репозитория (кнопка вверху справа) и клонируйте свой форк. Во вкладке **Actions** форка нажмите «I understand my workflows, go ahead and enable them».
-2. Откройте вкладку **Actions** — пайплайн `ci-cd` запустится на push.
-3. Создайте ветку, добавьте лишний импорт (`echo "import json" >> app/main.py`), откройте Pull Request — job `test` станет красным.
-   > ⚠️ GitHub по умолчанию предлагает открыть PR в исходный репозиторий курса. Переключите **base repository** на свой форк.
-4. Почините, смёржите в `main` — появится job `build` → образ в **Packages** (`ghcr.io/<login>/<repo>/backend:sha-…`).
-5. Скачайте свой образ и запустите его локально вместо сборки — это и есть «артефакт»:
-   ```bash
-   docker pull ghcr.io/<login>/devops-lab/backend:latest
-   ```
-
-### Задания для тех, кто закончил раньше
-1. Включите защиту ветки `main`: Settings → Branches → Require status checks to pass (`test`).
-2. Добавьте в job `test` шаг сканирования секретов — продолжение занятия 9:
-   ```yaml
-   - uses: actions/checkout@v7
-     with: { fetch-depth: 0 }
-   - name: Gitleaks
-     working-directory: .
-     run: docker run --rm -v "$PWD:/repo" zricethezav/gitleaks:latest git /repo -v
-   ```
-3. Напишите ещё один тест в `app/tests/test_app.py` — например, что `/` возвращает поле `service`.
-
----
-
-## Занятие 12. CD: деплой без рук
-
-Продолжение занятий 10 и 11: на занятии 10 мы выкатывали стек командой `ansible-playbook deploy.yml` с ноутбука, на занятии 11 научились собирать образ в CI. Теперь соединяем: после мёржа в `main` пайплайн **сам** заходит на ВМ, скачивает свежий образ из GHCR и перезапускает стек (`lesson12/docker-compose.prod.yml` — тот же стек, но бэкенд берётся из реестра, а не собирается на сервере). Имя проекта то же (`devops-lab`), поэтому стек занятия 10 просто заменяется, а данные в томе сохраняются.
-
-В репозитории: **Settings → Secrets and variables → Actions**
-
-| Тип | Имя | Значение |
+| Занятие | Тема | README |
 |---|---|---|
-| Secret | `SSH_HOST` | публичный IP ВМ |
-| Secret | `SSH_USER` | `deploy` |
-| Secret | `SSH_PRIVATE_KEY` | приватный ключ, чей публичный ключ добавлен пользователю deploy |
-| Secret | `POSTGRES_USER` / `POSTGRES_PASSWORD` | те же, что на занятии 10 (иначе Postgres не пустит: пароль уже записан в томе) |
-| Variable | `DEPLOY_ENABLED` | `true` |
+| 8 | Docker Compose: сети, тома, масштабирование | [lesson08/README.md](lesson08/README.md) |
+| 9 | Nginx перед бэкендом, конфигурация и секреты | [lesson09/README.md](lesson09/README.md) |
+| 10 | Infrastructure as Code: своя ВМ в cloud.ru через Terraform | [lesson10/README.md](lesson10/README.md) |
 
-> Ключ для CI сделайте отдельный: `ssh-keygen -t ed25519 -N '' -f ~/.ssh/ci_deploy` и `ssh-copy-id -i ~/.ssh/ci_deploy.pub deploy@<IP>`.
-
-Push в `main` → test → build → deploy → smoke test. Проверка:
-```bash
-curl http://<IP>/            # version = sha-<коммит>
-ssh deploy@<IP> "cd /opt/app && docker compose up -d --scale backend=3"   # nginx сам увидит новые реплики через ~5 с
-for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы идут на разные реплики
-```
-
-**Откат:** Actions → откройте прошлый успешный запуск `ci-cd` → **Re-run all jobs** — пересоберётся и выкатится тот коммит.
-
-### Задания для тех, кто закончил раньше
-1. Включите ручное подтверждение деплоя: Settings → Environments → `production` → Required reviewers. Получится Continuous Delivery.
-2. Сломайте `/health`: в `app/main.py` замените `(200 if ok else 503)` на `503` и запушьте. Тесты пройдут (без базы они и ждут 503), деплой выкатится, а smoke test покрасит пайплайн в красный. Откатитесь через Re-run прошлого успешного запуска.
-3. Замените ssh-шаги в job `deploy` на вызов `ansible-playbook` из занятия 10.
+> ⛔ С занятия 10 у вас появляются ресурсы в облаке. Закончили работу — **`terraform destroy`** в тот же день. ВМ не оставляем включённой, подробности — в [README занятия 10](lesson10/README.md).
 
 ---
 
 ## Если что-то не работает
+
+Здесь — общие проблемы с Docker. Ошибки конкретного занятия описаны в его README.
 
 Первое действие всегда: `docker compose ps` → `docker compose logs <сервис>`.
 
@@ -682,22 +405,12 @@ for i in $(seq 6); do curl -s http://<IP>/hits; echo; done   # запросы и
 | `pull` висит на `Waiting` / TLS handshake timeout / 403 / toomanyrequests | Нет доступа к Docker Hub | [Образы из GHCR](#образы-курса-из-нашего-реестра-ghcr) или [зеркала](#зеркала-docker-hub-запасной-вариант) |
 | `pull` висит на `Waiting` на всех слоях сразу, даже после перезапуска | Остались процессы `docker pull`, остановленные через Ctrl+Z, и недокачанные куски | `pkill -9 -f "docker pull"`; `sudo systemctl stop docker docker.socket containerd`; `sudo rm -rf /var/lib/containerd/io.containerd.content.v1.content/ingest/*`; `sudo systemctl start containerd docker` |
 | `password authentication failed` | Том создан со старым паролем | `docker compose down -v` (данные удалятся) |
-| `terraform init`: провайдер не скачивается | Нет `~/.terraformrc` с зеркалом | См. [Terraform](#terraform-для-всех) |
-| `No valid credential sources found` | Нет `SBC_ACCESS_KEY` / `SBC_SECRET_KEY` в этом окне терминала | `export …` в том же окне |
-| `Invalid value for variable` (prefix) | Префикс с заглавными/кириллицей/пробелом | Только строчная латиница, цифры, дефис: `ivanov` |
-| `Invalid reference … TODO_…` | Задание шага не выполнено | Замените TODO по подсказке в комментарии файла |
-| `no such file` в `file(pathexpand(…))` | Нет SSH-ключа | `ssh-keygen -t ed25519` |
-| `Your query returned no results` (образ / VPC) | Другое имя образа или сеть курса не создана | Спросить преподавателя; `image_name_regex`, `vpc_name` в tfvars |
-| `already exists` / `name … is duplicated` | Такой префикс уже занят другим студентом | Взять другой префикс (например, `ivanov2`) |
-| `quota` / `Insufficient …` | Кончились квоты общего проекта | Сказать преподавателю, работать в паре |
-| `ssh: Connection timed out` | ВМ ещё грузится / правило SSH не с вашего IP | Подождать 1–2 мин; проверить `allowed_ssh_cidr` и `curl -s ifconfig.me` |
-| `Permission denied (publickey)` | Не тот ключ / не тот пользователь | `ssh -i ~/.ssh/id_ed25519 root@<IP>`; ключ из шага 3 должен быть ваш |
-| `REMOTE HOST IDENTIFICATION HAS CHANGED` | ВМ пересоздана на том же IP | `ssh-keygen -R <IP>` |
-| Job `deploy` — skipped | Нет переменной `DEPLOY_ENABLED=true` | Settings → Secrets and variables → Actions → **Variables** |
 
 ## Не забудьте
 
-После окончания курса удалите облачные ресурсы — они тарифицируются, пока существуют:
+Облачные ресурсы тарифицируются, пока существуют. **После каждой работы с облаком** — на занятии и дома — удаляйте всё, что создали, в каждой папке, где делали `apply`:
 ```bash
-cd lesson10/practice && terraform destroy
+cd lesson10/practice && terraform destroy && terraform state list   # пусто
+cd ../hw            && terraform destroy && terraform state list   # если делали ДЗ
 ```
+Остановить ВМ в консоли недостаточно: за диск и публичный IP облако продолжает брать деньги.
