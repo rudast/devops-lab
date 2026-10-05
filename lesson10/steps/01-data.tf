@@ -16,6 +16,7 @@ data "sbercloud_images_image" "ubuntu" {
 data "sbercloud_compute_flavors" "vm" {
   availability_zone = data.sbercloud_availability_zones.zones.names[0]
   performance_type  = "normal"
+  generation        = var.vm_generation
   cpu_core_count    = var.vm_cpu
   memory_size       = var.vm_ram
 }
@@ -31,6 +32,11 @@ output "zone" {
 
 output "image" {
   value = "${data.sbercloud_images_image.ubuntu.name} (${data.sbercloud_images_image.ubuntu.id})"
+}
+
+# Минимальный размер системного диска для этого образа
+output "disk_min_gb" {
+  value = data.sbercloud_images_image.ubuntu.min_disk_gb
 }
 
 output "flavor" {
