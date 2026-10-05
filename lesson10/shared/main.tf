@@ -51,6 +51,12 @@ resource "sbercloud_vpc" "course" {
   cidr  = "192.168.0.0/16"
 }
 
+# Раньше VPC создавалась без count — переносим её в state без пересоздания
+moved {
+  from = sbercloud_vpc.course
+  to   = sbercloud_vpc.course[0]
+}
+
 data "sbercloud_vpc" "existing" {
   count = var.existing_vpc_name == "" ? 0 : 1
   name  = var.existing_vpc_name
