@@ -335,3 +335,47 @@ terraform destroy                  # в конце занятия — обяза
 - вывод `ssh hse-hw` с `hostname`, `whoami`, `sudo whoami`;
 - табличку прогнозов из задания 4 и ответы на вопросы;
 - **обязательно**: вывод финального `terraform destroy` («Destroy complete!») и пустой `terraform state list`. Без этого ДЗ не принимается.
+
+## Документация: если хочется поиграться
+
+### Провайдер sbercloud (главное)
+Репозиторий провайдера на GitHub — там вся документация и примеры. Сайт `registry.terraform.io` из России не открывается, а GitHub открывается.
+
+- [Документация провайдера](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/tree/master/docs): настройка и способы авторизации — `index.md`.
+- [Ресурсы](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/tree/master/docs/resources) (`resource "sbercloud_…"`) и [data sources](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/tree/master/docs/data-sources) (`data "sbercloud_…"`). Имя файла — это имя ресурса без префикса: `sbercloud_compute_instance` → `compute_instance.md`.
+- [Примеры](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/tree/master/examples): готовые конфигурации для ВМ, сетей, балансировщиков, баз данных, Kubernetes (CCE), хранилища OBS.
+
+На каждой странице ресурса есть пример, список аргументов (*Argument Reference*) и атрибутов (*Attribute Reference*). Ищите там пометку **Changing this creates a new …**: она значит, что изменение аргумента пересоздаст ресурс (`-/+`).
+
+Ресурсы, которые мы использовали на занятии:
+
+| Что | Ресурс / data source |
+|---|---|
+| ВМ | [`sbercloud_compute_instance`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/compute_instance.md) |
+| SSH-ключ | [`sbercloud_kps_keypair`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/kps_keypair.md) |
+| Группа безопасности и правила | [`sbercloud_networking_secgroup`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/networking_secgroup.md), [`sbercloud_networking_secgroup_rule`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/networking_secgroup_rule.md) |
+| Публичный IP | [`sbercloud_vpc_eip`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/vpc_eip.md), [`sbercloud_compute_eip_associate`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/compute_eip_associate.md) |
+| Сеть и подсеть | [`sbercloud_vpc`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/vpc.md), [`sbercloud_vpc_subnet`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/vpc_subnet.md) |
+| Образ, тип ВМ, зоны | [`images_image`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/data-sources/images_image.md), [`compute_flavors`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/data-sources/compute_flavors.md), [`availability_zones`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/data-sources/availability_zones.md) |
+
+### Документация cloud.ru
+- [Terraform для Advanced: обзор](https://cloud.ru/docs/terraform/ug/index.html) и [установка и настройка провайдера](https://cloud.ru/docs/terraform/ug/topics/guides__configuring-terraform-provider).
+- [Зеркало Terraform cloud.ru](https://cloud.ru/docs/terraform/ug/topics/guides__mirrors.html) — откуда мы берём сам Terraform и провайдеры.
+- [Как создать ключи доступа AK/SK](https://cloud.ru/docs/advanced/overview/faq/create-access-keys) — для своего аккаунта.
+- [Подключиться к Linux ECS по ключу](https://cloud.ru/docs/ecs/ug/topics/guides__connection__linux-ecs__key-pair).
+
+В документации cloud.ru две платформы: **Advanced** (наш провайдер `sbercloud`, регион `ru-moscow-1`) и **Evolution** (другой провайдер и другие ресурсы). Смотрите разделы для Advanced.
+
+### Сам Terraform
+- [Документация OpenTofu](https://opentofu.org/docs/) — открытый форк Terraform. Язык и команды те же, сайт открывается из России. Особенно полезны разделы про язык: `variable`, `output`, `count`/`for_each`, функции.
+- Справка прямо в терминале: `terraform -help`, `terraform plan -help`. Попробовать выражения: `terraform console`.
+
+### Что попробовать самому
+Идеи по возрастанию сложности. Ищите нужный ресурс в документации провайдера.
+1. **Две ВМ вместо одной** через `count` или `for_each`. Output со списком IP.
+2. **Дополнительный диск.** [`sbercloud_evs_volume`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/evs_volume.md) + [`sbercloud_compute_volume_attach`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/compute_volume_attach.md). На ВМ найдите его через `lsblk`, отформатируйте и смонтируйте.
+3. **Стек занятия 9 на ВМ.** Через cloud-init поставьте Docker, склонируйте `devops-lab` и поднимите `lesson09` командой `docker compose up -d`.
+4. **Балансировщик перед двумя ВМ.** [`sbercloud_lb_loadbalancer`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/lb_loadbalancer.md) и связанные ресурсы. Это тот же reverse proxy, что nginx на занятии 9, только облачный.
+5. **State в облаке.** Бакет [`sbercloud_obs_bucket`](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/resources/obs_bucket.md) и руководство [remote state backend](https://github.com/sbercloud-terraform/terraform-provider-sbercloud/blob/master/docs/guides/remote-state-backend.md). Так команда работает с одним state.
+
+> **Правила песочницы в общем проекте курса.** Только свой префикс в именах и теги `course`/`owner`. Ничего не трогайте руками у других. Балансировщики, базы данных и Kubernetes стоят заметно дороже ВМ — сначала спросите преподавателя. И в конце **всегда `terraform destroy`**. Хотите экспериментировать без ограничений — заведите свой аккаунт cloud.ru и свои ключи.
