@@ -196,7 +196,7 @@ ssh -o PubkeyAuthentication=no root@<IP>    # Permission denied — пароля
 ### Часть 4. Меняем инфраструктуру и читаем план (20 мин)
 1. **Изменение на месте (`~`).** В `04-vm.tf` добавьте тег `lesson = "10"` в `tags` → `terraform plan`: `~ update in-place` → `apply`.
 2. **Пересоздание правила (`-/+`).** Закройте SSH для всех, кроме себя. Узнайте свой IP: `curl -s ifconfig.me`. В `terraform.tfvars` пропишите `allowed_ssh_cidr = "<IP>/32"`. Выполните `terraform plan`: правило будет `-/+ must be replaced`, ищите в плане `# forces replacement`. Затем `apply` и проверьте, что `ssh` по-прежнему работает.
-3. **Пересоздание ВМ с cloud-init.** Ставим nginx при старте машины:
+3. **cloud-init и пересоздание ВМ (`-replace`).** Ставим nginx при старте машины:
    ```bash
    cp ../steps/05-http.tf ../steps/cloud-init.yaml.tftpl .
    ```
@@ -206,8 +206,13 @@ ssh -o PubkeyAuthentication=no root@<IP>    # Permission denied — пароля
    ```
    ```bash
    terraform fmt                 # выровнять код
-   terraform plan                # ВМ: -/+ (user_data forces replacement), правило HTTP: + create, EIP — без изменений!
+   terraform plan                # правило HTTP: + create, ВМ: ~ update in-place (user_data)
    terraform apply
+   curl http://$(terraform output -raw public_ip)/      # Connection refused! Почему?
+   ```
+   Провайдер записал новый `user_data` в существующую ВМ, но **cloud-init выполняется только при первом запуске** — nginx никто не поставил. План честно показал `~`, а результат не тот: Terraform не знает, что происходит *внутри* машины. Пересоздаём ВМ явно:
+   ```bash
+   terraform apply -replace=sbercloud_compute_instance.vm   # ВМ: -/+, EIP — без изменений!
    curl http://$(terraform output -raw public_ip)/      # «Привет! Эту ВМ создал …» (через 1–2 мин после apply)
    ssh root@$(terraform output -raw public_ip)          # WARNING: REMOTE HOST IDENTIFICATION HAS CHANGED!
    ssh-keygen -R $(terraform output -raw public_ip)     # это новая ВМ с новым ключом сервера — забываем старый
@@ -250,7 +255,7 @@ terraform destroy                  # в конце занятия — обяза
 | `ssh: Connection timed out` | ВМ ещё грузится / правило SSH не с вашего IP | Подождать 1–2 мин; проверить `allowed_ssh_cidr` и `curl -s ifconfig.me` |
 | `Permission denied (publickey)` | Не тот ключ / не тот пользователь | `ssh -i ~/.ssh/id_ed25519 root@<IP>`; ключ из шага 3 должен быть ваш |
 | `REMOTE HOST IDENTIFICATION HAS CHANGED` | ВМ пересоздана на том же IP | `ssh-keygen -R <IP>` |
-| Страница nginx не открывается | cloud-init ещё работает / нет правила для порта 80 | Подождать 2 мин; скопирован ли `05-http.tf`? На ВМ: `cloud-init status` |
+| Страница nginx не открывается | cloud-init ещё работает / нет правила для порта 80 / `user_data` добавили к уже работающей ВМ | Подождать 2 мин; скопирован ли `05-http.tf`? `terraform apply -replace=sbercloud_compute_instance.vm`; на ВМ: `cloud-init status` |
 
 ## ⛔ Главное правило: ВМ не оставляем включённой
 
@@ -300,7 +305,7 @@ terraform destroy                  # в конце занятия — обяза
      ssh_key = trimspace(file(pathexpand(var.ssh_public_key_path)))
    })
    ```
-   Перед `apply` прочитайте план и объясните, почему ВМ будет пересоздана. После — `ssh student@<IP>`, затем `whoami` и `sudo whoami`.
+   Если ВМ уже создана, обычного `apply` мало: объясните почему и примените через `terraform apply -replace=sbercloud_compute_instance.vm`. После — `ssh student@<IP>`, затем `whoami` и `sudo whoami`.
 3. **Вход одной командой.** Добавьте output, который печатает готовый блок для `~/.ssh/config`:
    ```hcl
    output "ssh_config" {
