@@ -282,9 +282,11 @@ bash scripts/pull-images.sh
 
 | Занятие | Тема | README |
 |---|---|---|
-| 8 | Docker Compose: сети, тома, масштабирование | [lesson08/README.md](lesson08/README.md) |
-| 9 | Nginx перед бэкендом, конфигурация и секреты | [lesson09/README.md](lesson09/README.md) |
-| 10 | Infrastructure as Code: своя ВМ в cloud.ru через Terraform | [lesson10/README.md](lesson10/README.md) |
+| 8 | Docker Compose: сети, тома, масштабирование | [lesson08/README.md](lesson08/README.md) · [шаблон ДЗ](lesson08/HOMEWORK.md) |
+| 9 | Nginx перед бэкендом, конфигурация и секреты | [lesson09/README.md](lesson09/README.md) · [шаблон ДЗ](lesson09/HOMEWORK.md) |
+| 10 | Infrastructure as Code: своя ВМ в cloud.ru через Terraform | [lesson10/README.md](lesson10/README.md) · [шаблон ДЗ](lesson10/HOMEWORK.md) |
+
+**Как сдавать ДЗ:** в папке каждого занятия лежит шаблон `HOMEWORK.md`. Скопируйте его, назовите `ДЗ-<номер>-<фамилия>.md` (например, `ДЗ-08-ivanov.md`), заполните и отправьте **файлом в чат группы** до начала следующего занятия. Вывод команд — текстом, без скриншотов. Пароли и ключи в ДЗ не вставляйте никогда.
 
 > ⛔ С занятия 10 у вас появляются ресурсы в облаке. Закончили работу — **`terraform destroy`** в тот же день. ВМ не оставляем включённой, подробности — в [README занятия 10](lesson10/README.md).
 
