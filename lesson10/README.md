@@ -268,7 +268,9 @@ terraform destroy                  # в конце занятия — обяза
 
 ## Домашнее задание
 
-Срок — до следующего занятия. Работаете в том же общем проекте и с теми же ключами доступа. Для ДЗ используйте префикс **`<фамилия>-hw`**, например `ivanov-hw`, чтобы не пересечься с ресурсами занятия.
+**Срок — до следующего занятия.** Как сдавать: заполните шаблон [HOMEWORK.md](HOMEWORK.md) (скопируйте, назовите `ДЗ-10-фамилия.md`) и отправьте файлом в чат группы.
+
+Работаете в том же общем проекте и с теми же ключами доступа. Для ДЗ используйте префикс **`<фамилия>-hw`**, например `ivanov-hw`, чтобы не пересечься с ресурсами занятия.
 
 > ⛔ Каждую сессию ДЗ заканчивайте `terraform destroy` + `terraform state list` (пусто). См. раздел «Главное правило» выше.
 
@@ -322,8 +324,8 @@ terraform destroy                  # в конце занятия — обяза
    - Почему ключи доступа к облаку нельзя класть в `terraform.tfvars`, даже если он в `.gitignore`?
    - Чем `data` отличается от `resource`?
 
-**Что сдать** (как именно — скажет преподаватель):
-- ваши `main.tf`, `outputs.tf` и `cloud-init.yaml.tftpl`. **Без** `terraform.tfstate`, `terraform.tfvars` и ключей;
-- вывод `ssh hse-hw` с командами `hostname`, `whoami`, `sudo whoami`;
+**Что сдать** — всё по шаблону [HOMEWORK.md](HOMEWORK.md):
+- `main.tf`, `outputs.tf`, `cloud-init.yaml.tftpl` — текстом в шаблон. **Без** `terraform.tfstate`, `terraform.tfvars` и ключей;
+- вывод `ssh hse-hw` с `hostname`, `whoami`, `sudo whoami`;
 - табличку прогнозов из задания 4 и ответы на вопросы;
-- **обязательно**: вывод финального `terraform destroy` («Destroy complete!») и пустой `terraform state list`.
+- **обязательно**: вывод финального `terraform destroy` («Destroy complete!») и пустой `terraform state list`. Без этого ДЗ не принимается.
