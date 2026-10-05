@@ -26,15 +26,15 @@ variable "image_name_regex" {
   default     = "^Ubuntu 22.04 server 64bit$"   # $ — без GPU-образов «… with Grid Driver»
 }
 
-# Тип ВМ курса: s7n.medium.2 = поколение s7n, 1 vCPU, 2 ГБ — самый экономный по квотам
-variable "vm_generation" {
-  description = "Поколение (семейство) типа ВМ"
+# Тип ВМ курса: s7n.medium.2 — 1 vCPU, 2 ГБ, самый экономный по квотам
+variable "vm_flavor" {
+  description = "Тип (flavor) ВМ"
   type        = string
-  default     = "s7n"
+  default     = "s7n.medium.2"
 }
 
 variable "vm_cpu" {
-  description = "Число vCPU"
+  description = "Число vCPU у vm_flavor (для проверки, что тип есть в зоне)"
   type        = number
   default     = 1
 }
