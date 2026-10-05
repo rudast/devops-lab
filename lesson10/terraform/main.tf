@@ -65,7 +65,7 @@ resource "sbercloud_compute_instance" "vm" {
   security_group_ids = [sbercloud_networking_secgroup.vm.id]
   key_pair           = sbercloud_kps_keypair.key.name
 
-  # cloud-init: ставит nginx при ПЕРВОМ запуске. Изменение user_data = пересоздание ВМ (-/+)
+  # cloud-init: ставит nginx при ПЕРВОМ запуске. Поменяли user_data у готовой ВМ → terraform apply -replace=sbercloud_compute_instance.vm
   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", { prefix = var.prefix })
 
   system_disk_type = "SAS"
