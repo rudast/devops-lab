@@ -26,22 +26,29 @@ variable "image_name_regex" {
   default     = "^Ubuntu 22.04 server 64bit$"   # $ — без GPU-образов «… with Grid Driver»
 }
 
+# Тип ВМ курса: s7n.medium.2 = поколение s7n, 1 vCPU, 2 ГБ — самый экономный по квотам
+variable "vm_generation" {
+  description = "Поколение (семейство) типа ВМ"
+  type        = string
+  default     = "s7n"
+}
+
 variable "vm_cpu" {
   description = "Число vCPU"
   type        = number
-  default     = 2
+  default     = 1
 }
 
 variable "vm_ram" {
   description = "Память, ГБ"
   type        = number
-  default     = 4
+  default     = 2
 }
 
 variable "vm_disk_size" {
-  description = "Размер системного диска, ГБ"
+  description = "Размер системного диска, ГБ. Меньше минимума образа не будет. Увеличивать можно, уменьшать — нет"
   type        = number
-  default     = 20
+  default     = 10
 }
 
 variable "ssh_public_key_path" {
