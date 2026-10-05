@@ -13,10 +13,9 @@ data "sbercloud_images_image" "ubuntu" {
 }
 
 # Тип ВМ (flavor) с нужным числом vCPU и памяти
+# (список всех типов с таким же числом vCPU и памяти в зоне — чтобы проверить, что наш тип там есть)
 data "sbercloud_compute_flavors" "vm" {
   availability_zone = data.sbercloud_availability_zones.zones.names[0]
-  performance_type  = "normal"
-  generation        = var.vm_generation
   cpu_core_count    = var.vm_cpu
   memory_size       = var.vm_ram
 }
@@ -40,7 +39,12 @@ output "disk_min_gb" {
 }
 
 output "flavor" {
-  value = data.sbercloud_compute_flavors.vm.ids[0]
+  value = var.vm_flavor
+
+  precondition {
+    condition     = contains(data.sbercloud_compute_flavors.vm.ids, var.vm_flavor)
+    error_message = "Типа ВМ ${var.vm_flavor} нет в зоне ${data.sbercloud_availability_zones.zones.names[0]}. Доступны ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ: ${join(", ", data.sbercloud_compute_flavors.vm.ids)}"
+  }
 }
 
 output "subnet" {

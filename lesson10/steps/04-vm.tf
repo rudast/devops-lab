@@ -8,7 +8,7 @@
 resource "sbercloud_compute_instance" "vm" {
   name               = "${var.prefix}-vm"
   image_id           = data.sbercloud_images_image.ubuntu.id
-  flavor_id          = data.sbercloud_compute_flavors.vm.ids[0]
+  flavor_id          = var.vm_flavor
   availability_zone  = data.sbercloud_availability_zones.zones.names[0]
   security_group_ids = [sbercloud_networking_secgroup.vm.id]
   key_pair           = TODO_KEY
