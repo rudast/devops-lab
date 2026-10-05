@@ -243,7 +243,7 @@ terraform destroy                  # в конце занятия — обяза
 | `Invalid value for variable` (prefix) | Префикс с заглавными/кириллицей/пробелом | Только строчная латиница, цифры, дефис: `ivanov` |
 | `Invalid reference … TODO_…` | Задание шага не выполнено | Замените TODO по подсказке в комментарии файла |
 | `no such file` в `file(pathexpand(…))` | Нет SSH-ключа | `ssh-keygen -t ed25519` |
-| `Your query returned no results` (образ / VPC) | Другое имя образа или сеть курса не создана | Спросить преподавателя; `image_name_regex`, `vpc_name` в tfvars |
+| `Your query returned no results` (образ / подсеть) | Другое имя образа или подсеть курса не создана | Спросить преподавателя; `image_name_regex`, `subnet_name` в tfvars |
 | `Warning: Incomplete lock file information` при `init` | Провайдер скачан с зеркала, контрольные суммы посчитаны локально | Это не ошибка, можно продолжать |
 | `already exists` / `name … is duplicated` | Такой префикс уже занят другим студентом | Взять другой префикс (например, `ivanov2`) |
 | `quota` / `Insufficient …` | Кончились квоты общего проекта | Сказать преподавателю, работать в паре |
