@@ -4,8 +4,10 @@
 # Затем ВРУЧНУЮ добавьте в ресурс sbercloud_compute_instance.vm (файл 04-vm.tf) строку:
 #   user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", { prefix = var.prefix })
 #
-# terraform plan покажет: правило — "+ create", ВМ — "-/+ must be replaced".
-# Прочитайте, какая строка плана вызывает пересоздание (# forces replacement).
+# terraform plan покажет: правило — "+ create", ВМ — "~ update in-place" (поменяется user_data).
+# ЛОВУШКА: cloud-init выполняется только при ПЕРВОМ запуске ВМ. Машина уже запущена — nginx не появится.
+# Поэтому ВМ пересоздаём явно:
+#   terraform apply -replace=sbercloud_compute_instance.vm
 
 resource "sbercloud_networking_secgroup_rule" "http" {
   security_group_id = sbercloud_networking_secgroup.vm.id
