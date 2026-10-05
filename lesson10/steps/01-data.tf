@@ -20,14 +20,9 @@ data "sbercloud_compute_flavors" "vm" {
   memory_size       = var.vm_ram
 }
 
-# Общая сеть курса — её создал преподаватель (lesson10/shared)
-data "sbercloud_vpc" "course" {
-  name = var.vpc_name
-}
-
+# Общая подсеть курса — её создал преподаватель (lesson10/shared). Ищем по имени
 data "sbercloud_vpc_subnet" "course" {
-  name   = var.subnet_name
-  vpc_id = data.sbercloud_vpc.course.id
+  name = var.subnet_name
 }
 
 output "zone" {
