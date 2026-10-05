@@ -14,14 +14,8 @@ variable "prefix" {
   }
 }
 
-variable "vpc_name" {
-  description = "Общая сеть курса (её заранее создал преподаватель, см. lesson10/shared)"
-  type        = string
-  default     = "devops-course-vpc"
-}
-
 variable "subnet_name" {
-  description = "Общая подсеть курса"
+  description = "Общая подсеть курса (её заранее создал преподаватель, см. lesson10/shared)"
   type        = string
   default     = "devops-course-subnet"
 }
