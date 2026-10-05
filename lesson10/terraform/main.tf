@@ -11,10 +11,9 @@ data "sbercloud_images_image" "ubuntu" {
 }
 
 # Тип ВМ (flavor) с нужным числом vCPU и памяти
+# (список всех типов с таким же числом vCPU и памяти в зоне — чтобы проверить, что наш тип там есть)
 data "sbercloud_compute_flavors" "vm" {
   availability_zone = data.sbercloud_availability_zones.zones.names[0]
-  performance_type  = "normal"
-  generation        = var.vm_generation
   cpu_core_count    = var.vm_cpu
   memory_size       = var.vm_ram
 }
@@ -61,7 +60,7 @@ resource "sbercloud_kps_keypair" "key" {
 resource "sbercloud_compute_instance" "vm" {
   name               = "${var.prefix}-vm"
   image_id           = data.sbercloud_images_image.ubuntu.id
-  flavor_id          = data.sbercloud_compute_flavors.vm.ids[0]
+  flavor_id          = var.vm_flavor
   availability_zone  = data.sbercloud_availability_zones.zones.names[0]
   security_group_ids = [sbercloud_networking_secgroup.vm.id]
   key_pair           = sbercloud_kps_keypair.key.name

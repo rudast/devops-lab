@@ -7,7 +7,12 @@ output "image" {
 }
 
 output "flavor" {
-  value = data.sbercloud_compute_flavors.vm.ids[0]
+  value = var.vm_flavor
+
+  precondition {
+    condition     = contains(data.sbercloud_compute_flavors.vm.ids, var.vm_flavor)
+    error_message = "Типа ВМ ${var.vm_flavor} нет в зоне ${data.sbercloud_availability_zones.zones.names[0]}. Доступны ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ: ${join(", ", data.sbercloud_compute_flavors.vm.ids)}"
+  }
 }
 
 output "subnet" {
