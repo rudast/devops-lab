@@ -47,7 +47,7 @@ resource "sbercloud_networking_secgroup_rule" "http" {
 
 resource "sbercloud_kps_keypair" "key" {
   name       = "${var.prefix}-l11-key"
-  public_key = file(pathexpand(var.ssh_public_key_path))
+  public_key = trimspace(file(pathexpand(var.ssh_public_key_path))) # trimspace — убрать перевод строки в конце файла
 }
 
 # ---------- Сервер через модуль ----------
@@ -76,8 +76,10 @@ module "web" {
   })
 }
 
-# ЧАСТЬ 2 — for_each: см. README. Понадобится и блок moved:
+# ЧАСТЬ 2 — disk_size = 15 (см. README). ЧАСТЬ 3 — for_each, понадобится и блок moved:
 # moved {
 #   from = module.web
 #   to   = module.web["web-1"]
 # }
+
+# ЧАСТЬ 6 — сюда допишите блок import (см. README).

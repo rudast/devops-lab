@@ -1,18 +1,28 @@
-# ЧАСТЬ 1: один сервер — один IP
+# ЧАСТЬ 1: один сервер — один IP.
+# В ЧАСТИ 3 (for_each) закомментируйте эти два выхода: module.web станет картой серверов.
 output "public_ip" {
   value = module.web.public_ip
 }
 
 output "url" {
-  value = "http://${module.web.public_ip}/"
+  value = "http://${module.web.public_ip}/" # ЧАСТЬ 2: замените на module.web.url
 }
 
-# ЧАСТЬ 2: когда серверов станет несколько (for_each), замените выходы выше на эти:
+# ЧАСТЬ 4: выходы для нескольких серверов. Раскомментируйте и замените TODO на for-выражения.
+# module.web — карта: { "web-1" = <выходы модуля>, "web-2" = <выходы модуля> }
 #
 # output "public_ips" {
-#   value = { for k, vm in module.web : k => vm.public_ip }
+#   value = TODO # карта «имя → публичный IP»:  { "web-1" = "1.2.3.4", … }
 # }
 #
 # output "urls" {
-#   value = [for vm in module.web : "http://${vm.public_ip}/"]
+#   value = TODO # список адресов страниц — из выхода url модуля
+# }
+#
+# output "big_disks" {
+#   value = TODO # имена серверов из var.servers, у которых disk_size > 10 (for … if …)
+# }
+#
+# output "servers_count" {
+#   value = TODO # сколько серверов (функция length)
 # }
