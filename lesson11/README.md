@@ -4,7 +4,7 @@
 
 1. **Модуль** — описать «сервер» один раз и вызывать его как функцию.
 2. **`for_each`** — создать N серверов одной картой, а не копипастой.
-3. **Удалённый state** — хранить state в облаке, чтобы вся команда видела одну и ту же картину.
+3. **Удалённый state с блокировкой** — хранить state в общей базе данных, чтобы вся команда видела одну и ту же картину, а два одновременных `apply` не испортили его.
 
 ```
                        ┌──────────── practice/ (корневой модуль) ────────────┐
@@ -13,7 +13,7 @@ var.servers = {        │  data: образ, подсеть      resource: fire
   web-2 = {}           └──────────────────────────────┬──────────────────────┘
 }                                                     │ state
                                                       ▼
-                                  бакет OBS: <prefix>/lesson11.tfstate
+                    PostgreSQL курса: workspace <prefix>-l11 (+ блокировка)
 ```
 
 ## Подготовка
@@ -27,7 +27,7 @@ var.servers = {        │  data: образ, подсеть      resource: fire
   ```
 - [ ] Найдите напарника: часть 4 делается в паре.
 
-Ключи доступа преподаватель даст на занятии, как и в прошлый раз. Для state в облаке понадобятся **те же ключи**, но под другими именами (об этом в части 3).
+Ключи доступа преподаватель даст на занятии, как и в прошлый раз. Для части 3 он даст ещё **строку подключения к базе state** (`PG_CONN_STR`) — тоже только в закрытый чат, тоже только в `export`.
 
 ## Практика
 
@@ -136,60 +136,73 @@ servers = {
 
 > **Почему не `count`?** С `count` серверы адресуются по номеру: `[0]`, `[1]`, `[2]`. Пусть имена берутся из списка `["web-1", "web-2", "web-3"]`. Уберите из списка `web-2` — номера «сдвинутся»: сервер `[1]` получит настройки web-3 и изменится, хотя его не трогали, а `[2]` (настоящий web-3) будет удалён. У `for_each` адрес — имя (`["web-3"]`), оно не сдвигается.
 
-### Часть 3. State в облаке (15 мин)
+### Часть 3. State в базе данных (15 мин)
 
-Сейчас state — файл `terraform.tfstate` на вашем ноутбуке. Его не видит напарник, его можно потерять вместе с ноутбуком, его нельзя класть в Git (в нём IP, ID и иногда секреты). Решение — **backend**: хранилище state вне ноутбука. В cloud.ru это бакет **OBS** — объектное хранилище, совместимое с Amazon S3.
+Сейчас state — файл `terraform.tfstate` на вашем ноутбуке. Его не видит напарник, его можно потерять вместе с ноутбуком, его нельзя класть в Git (в нём IP, ID и иногда секреты). И главное: если два человека одновременно сделают `apply`, каждый со своей копией, они испортят друг другу работу.
+
+Решение — **backend**: хранилище state вне ноутбука. У нас это **PostgreSQL курса** (бэкенд `pg`): преподаватель поднял его кодом из `lesson10/shared/state-db.tf`. State лежит в таблице, а на время `plan`/`apply` Terraform ставит **блокировку**. Второй человек в тот же state не попадёт, пока первый не закончит.
 
 ```bash
-cat backend.tf.example
-cp backend.tf.example backend.tf
+cat backend.tf.example           # в нём нет ни адреса, ни пароля — только имя схемы
+export PG_CONN_STR="…"           # строка подключения от преподавателя: адрес, пользователь, пароль
 ```
 
-Бакет `hse-devops-tfstate` заранее создал преподаватель. Если он назовёт другое имя — поправьте `bucket` в `backend.tf`.
-
-Backend на протоколе S3 ищет ключи в переменных `AWS_*`. Это те же ключи cloud.ru:
+Переносим свой state в базу. Каждый работает в своём **workspace** — отдельном state внутри общей базы, по одному на человека:
 
 ```bash
-export AWS_ACCESS_KEY_ID="$SBC_ACCESS_KEY"  AWS_SECRET_ACCESS_KEY="$SBC_SECRET_KEY"
-
-# в блоке backend нельзя использовать переменные — свой путь к state передаём при init:
-terraform init -migrate-state -backend-config="key=<prefix>/lesson11.tfstate"
-#   Do you want to copy existing state to the new backend? → yes
+mv terraform.tfstate lesson11.tfstate        # 1. откладываем локальный state в сторону
+cp backend.tf.example backend.tf             # 2. подключаем backend "pg"
+terraform init                               #    Successfully configured the backend "pg"!
+terraform workspace new <prefix>-l11         # 3. свой workspace: Created and switched to workspace
+terraform state push lesson11.tfstate        # 4. загружаем отложенный state в базу
 ```
 
 Проверяем:
 
 ```bash
-terraform state list        # те же ресурсы — state теперь читается из облака
+terraform workspace list    # все workspace группы; ваш — со звёздочкой
+terraform state list        # те же ресурсы — state теперь читается из базы
 terraform plan              # No changes
-cat terraform.tfstate       # пустой файл: локальная копия больше не используется
-rm terraform.tfstate terraform.tfstate.backup
+rm lesson11.tfstate terraform.tfstate.backup
 ```
 
-В консоли cloud.ru откройте **Object Storage Service → бакет → папка с вашим префиксом**. Там лежит `lesson11.tfstate`.
+> ⚠️ Workspace `default` — общий для всех, в нём не работаем. Если `terraform workspace show` показывает `default` — сделайте `terraform workspace select <prefix>-l11`.
 
-> **Блокировки нет.** Если двое одновременно сделают `apply` в один state, кто-то из них перезапишет изменения другого. В Amazon блокировку делает отдельная таблица DynamoDB. У нас её нет, поэтому правило команды: **`apply` запускает один человек**, остальные смотрят `plan`.
+> **Почему в блоке `backend` нет пароля?** Переменные в `backend` использовать нельзя: backend настраивается раньше, чем Terraform читает переменные. А секреты в файлах держать нельзя. Поэтому строка подключения приходит из переменной окружения `PG_CONN_STR`, а свой state каждый выбирает через workspace.
 
-### Часть 4. Работа в паре: чужой state (10 мин)
+### Часть 4. Работа в паре: блокировка и чужой state (10 мин)
 
-Вы с напарником — два «инженера», которые хотят посмотреть на инфраструктуру друг друга. Только `plan`, **никаких `apply`!**
+Вы с напарником — два «инженера», которые работают с одной инфраструктурой. Делаем копию папки и подключаемся к **state напарника**:
 
 ```bash
 cd ..                                   # из practice в lesson11
 cp -r practice practice-partner
 cd practice-partner
-rm -rf .terraform terraform.tfstate*    # отвязываемся от своего state
-terraform init -backend-config="key=<prefix-напарника>/lesson11.tfstate"
+rm -rf .terraform terraform.tfstate*
+terraform init
+terraform workspace select <prefix-напарника>-l11
 terraform state list                    # серверы напарника!
-terraform plan
 ```
 
-План, скорее всего, **не пустой**. Ищите причину в плане:
+**Блокировка.** Напарник у себя в `practice` запускает `terraform apply` и **не отвечает** на вопрос `Enter a value:` — пока он думает, state заблокирован. Вы в это время в копии:
+
+```bash
+terraform plan
+#   Error: Error acquiring the state lock
+#   Error message: Workspace is already locked: <prefix-напарника>-l11
+terraform plan -lock-timeout=60s        # ждём до минуты, пока блокировку не снимут
+```
+
+Напарник отвечает `no` — ваш `plan` сразу продолжается. Затем поменяйтесь ролями.
+
+> Если бы state лежал у каждого в своём файле, два `apply` прошли бы оба — и один затёр бы изменения другого. Блокировка превращает это в понятную ошибку. А если ноутбук с `apply` упал или потерял сеть, соединение с базой рвётся и блокировка снимается **сама**.
+
+**Чужой план.** Теперь просто `terraform plan` в копии. План, скорее всего, **не пустой**. Ищите причину в плане:
 - другой `prefix` в вашем `terraform.tfvars` → Terraform хочет переименовать все ресурсы;
 - другой публичный ключ в `~/.ssh/id_ed25519.pub` → ключевая пара `-/+`;
 - другая карта `servers`.
 
-Поставьте в `terraform.tfvars` префикс напарника — план станет короче. Вывод: инфраструктуру описывают **код + переменные + state** вместе. Код лежит в Git, state в бакете, а переменные команда тоже должна хранить общими, а не у каждого свои.
+Только `plan`, **никаких `apply`** в чужом workspace! Поставьте в `terraform.tfvars` префикс напарника — план станет короче. Вывод: инфраструктуру описывают **код + переменные + state** вместе. Код лежит в Git, state в базе, а переменные команда тоже должна хранить общими, а не у каждого свои.
 
 ```bash
 cd .. && rm -rf practice-partner        # чужой state больше не нужен
@@ -203,13 +216,13 @@ terraform destroy
 terraform state list       # пусто
 ```
 
-Файл state в бакете **остаётся**, но он пустой. Так и должно быть: при следующем `apply` Terraform продолжит с него.
+Ваш workspace в базе **остаётся**, но state в нём пустой. Так и должно быть: при следующем `apply` Terraform продолжит с него.
 
 ### Задания для тех, кто закончил раньше
 
 1. Добавьте в модуль вход `flavor` со значением по умолчанию и сделайте у одного сервера в `servers` другой тип ВМ. Карта в `servers` для этого должна уметь хранить `flavor`.
 2. Выведите output `servers`: карта «имя → { ip, url }» одним for-выражением.
-3. Посмотрите state из облака напрямую: `terraform state pull | head -30`. Найдите там ресурсы модуля.
+3. Посмотрите state из базы напрямую: `terraform state pull | head -30`. Найдите там ресурсы модуля.
 
 ## Если что-то не работает
 
@@ -219,10 +232,12 @@ terraform state list       # пусто
 | `Unreadable module directory` / `source` не найден | Неверный путь в `source` | `source = "../modules/vm"` — путь от папки `practice` |
 | `Invalid reference` в `subnet_id`/`key_pair` | Пропущена часть адреса | `data.<тип>.<имя>.id`, `<тип>.<имя>.name` |
 | План хочет удалить web-1 после `for_each` | Сменился адрес ресурса | Блок `moved` из части 2 |
-| `No valid credential sources found` / `InvalidAccessKeyId` при init | Не заданы `AWS_*` | `export AWS_ACCESS_KEY_ID="$SBC_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SBC_SECRET_KEY"` |
-| `NoSuchBucket` | Неверное имя бакета | Имя — у преподавателя, поправьте `bucket` в `backend.tf` |
-| `Backend configuration changed` | Поменяли `backend.tf` или `key` | `terraform init -reconfigure -backend-config="key=…"` |
-| `AccessDenied` при init | У ключей нет прав на OBS | Сообщите преподавателю |
+| `conn_str` не задан / `connection refused` при init | Нет `PG_CONN_STR` в этом окне терминала | `export PG_CONN_STR="…"` (строка от преподавателя) |
+| `password authentication failed` | Ошибка в строке подключения | Скопируйте строку заново, целиком, в кавычках |
+| `no pg_hba.conf entry … no encryption` | В строке нет `sslmode=require` | Скопируйте строку целиком |
+| `Error acquiring the state lock` | В этот state сейчас работает кто-то другой | Подождите или `-lock-timeout=60s`. Это защита, а не ошибка |
+| `terraform workspace show` → `default` | Не выбран свой workspace | `terraform workspace select <prefix>-l11` |
+| Do you want to copy existing state to the new backend? | Не отложили `terraform.tfstate` перед `init` | Ответьте `no` и сделайте шаги 1, 3, 4 части 3 |
 
 ## ⛔ Главное правило: ресурсы не оставляем
 
@@ -237,10 +252,12 @@ terraform state list       # пусто
 
 **Срок — до занятия 12.** Как сдавать: заполните шаблон [HOMEWORK.md](HOMEWORK.md) (скопируйте, назовите `ДЗ-11-фамилия.md`) и отправьте файлом в чат группы.
 
-Работайте в копии: `cp -r practice hw && cd hw && rm -rf .terraform terraform.tfstate*`. Префикс — **`<фамилия>-hw`**, state — **отдельный**:
+Работайте в копии: `cp -r practice hw && cd hw && rm -rf .terraform terraform.tfstate*`. Префикс — **`<фамилия>-hw`**, state — **отдельный** workspace:
 
 ```bash
-terraform init -reconfigure -backend-config="key=<фамилия>-hw/hw11.tfstate"
+export PG_CONN_STR="…"
+terraform init
+terraform workspace new <фамилия>-hw11
 ```
 
 1. **Свой модуль firewall.** Вынесите группу безопасности в модуль `lesson11/modules/firewall`:
@@ -252,12 +269,12 @@ terraform init -reconfigure -backend-config="key=<фамилия>-hw/hw11.tfstat
 
    **Цель — переезд без пересоздания:** добавьте блоки `moved`, чтобы `terraform plan` после рефакторинга показал `0 to add, 0 to change, 0 to destroy`. Подсказка: адрес правила внутри модуля выглядит так: `module.firewall.sbercloud_networking_secgroup_rule.this["22"]`.
 2. **Три сервера.** Задайте `servers` из трёх серверов, у одного `disk_size = 20`. Сделайте `apply`. Затем удалите из карты средний сервер и сохраните **итоговую строку** `terraform plan` (`Plan: …`). Что удаляется и что нет?
-3. **State в облаке.** Приложите вывод `terraform state list` и путь к вашему state в бакете.
+3. **State в базе.** Приложите вывод `terraform workspace show` и `terraform state list`.
 4. **Вопросы (письменно, коротко):**
    - Чем `for_each` лучше `count` для серверов? Что случится с `count`, если удалить средний элемент?
-   - Почему в блоке `backend` нельзя использовать переменные и как мы обошли это ограничение?
-   - Что может случиться, если два человека одновременно сделают `apply` в один state? Как от этого защищаются?
+   - Почему в блоке `backend` нельзя использовать переменные и как мы обошли это ограничение (адрес и пароль базы, свой state у каждого)?
+   - Что может случиться, если два человека одновременно сделают `apply` в один state без блокировки? Что произошло у вас в части 4 и почему блокировка снимается сама, если ноутбук упал?
    - Зачем нужен блок `moved`?
 5. ⛔ **Уборка:** `terraform destroy` и пустой `terraform state list`. Без этого ДЗ не принимается.
 
-**Что сдать** — всё по шаблону [HOMEWORK.md](HOMEWORK.md): код модуля `firewall`, вызов модуля и блоки `moved`, выводы команд, ответы и вывод `destroy`. **Без** `terraform.tfvars`, `terraform.tfstate` и ключей.
+**Что сдать** — всё по шаблону [HOMEWORK.md](HOMEWORK.md): код модуля `firewall`, вызов модуля и блоки `moved`, выводы команд, ответы и вывод `destroy`. **Без** `terraform.tfvars`, `terraform.tfstate`, ключей и строки `PG_CONN_STR`.
