@@ -1,6 +1,14 @@
 resource "sbercloud_kps_keypair" "key" {
   name       = "${var.prefix}-l12-key"
   public_key = file(pathexpand(var.ssh_public_key_path))
+
+  # Workspace default в базе state — общий для всех. Работаем только в своём.
+  lifecycle {
+    precondition {
+      condition     = terraform.workspace != "default"
+      error_message = "Работайте в своём workspace: terraform workspace new <prefix>-l12 (или select)."
+    }
+  }
 }
 
 # ---------- База данных: одна ВМ, без публичного IP ----------
