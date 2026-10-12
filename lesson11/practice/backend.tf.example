@@ -1,26 +1,17 @@
 # Часть 3. Скопируйте в backend.tf:  cp backend.tf.example backend.tf
 #
-# В блоке backend НЕЛЬЗЯ использовать переменные. Поэтому общие настройки — здесь,
-# а свой путь к state каждый передаёт при init:
-#   export AWS_ACCESS_KEY_ID="$SBC_ACCESS_KEY" AWS_SECRET_ACCESS_KEY="$SBC_SECRET_KEY"
-#   terraform init -migrate-state -backend-config="key=<prefix>/lesson11.tfstate"
+# State хранится в PostgreSQL курса (бэкенд "pg"). На время plan/apply Terraform ставит
+# блокировку: второй человек в тот же state получит «Error acquiring the state lock».
 #
-# Блокировки state здесь нет: два одновременных apply в один state испортят его.
-# Договаривайтесь в команде, кто запускает apply.
+# В блоке backend НЕЛЬЗЯ использовать переменные, а пароли в файлах держать нельзя.
+# Поэтому адрес и пароль базы — в переменной окружения (строку даёт преподаватель):
+#   export PG_CONN_STR="postgres://…?sslmode=require"
+# а свой state каждый выбирает через workspace:
+#   terraform init
+#   terraform workspace new <prefix>-l11
 
 terraform {
-  backend "s3" {
-    bucket = "hse-devops-tfstate" # имя бакета скажет преподаватель
-    region = "ru-moscow-1"
-    endpoints = {
-      s3 = "https://obs.ru-moscow-1.hc.sbercloud.ru"
-    }
-
-    # OBS — не Amazon: отключаем проверки, которые есть только в AWS
-    skip_region_validation      = true
-    skip_credentials_validation = true
-    skip_requesting_account_id  = true
-    skip_metadata_api_check     = true
-    skip_s3_checksum            = true
+  backend "pg" {
+    schema_name = "devops_course" # общая схема курса; внутри — по workspace на каждого
   }
 }
