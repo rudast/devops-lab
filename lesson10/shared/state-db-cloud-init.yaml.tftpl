@@ -1,0 +1,40 @@
+#cloud-config
+# ВМ с PostgreSQL для state студентов (бэкенд "pg").
+# Только SSL (sslmode=require у клиентов) и вход по паролю; каждый час — pg_dump в /var/backups/tfstate.
+package_update: true
+packages:
+  - docker.io
+  - openssl
+write_files:
+  - path: /opt/tfstate/pg_hba.conf
+    permissions: "0644"
+    content: |
+      # внутри контейнера (инициализация БД, pg_dump) — без пароля
+      local   all  all                 trust
+      # снаружи — только SSL и только по паролю
+      hostssl all  all  0.0.0.0/0      scram-sha-256
+  - path: /opt/tfstate/start.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail   # без -x: иначе пароль попадёт в лог
+      cd /opt/tfstate
+      # самоподписанный сертификат: шифрует трафик (в state бывают пароли)
+      [ -f server.key ] || openssl req -new -x509 -days 730 -nodes -subj "/CN=devops-course-state-db" \
+        -keyout server.key -out server.crt
+      chown 70:70 server.key server.crt pg_hba.conf   # 70 — пользователь postgres в образе alpine
+      chmod 600 server.key
+      systemctl enable --now docker
+      docker run -d --name tfstate-db --restart unless-stopped \
+        -p 5432:5432 -v tfstate-data:/var/lib/postgresql/data -v /opt/tfstate:/etc/tfstate:ro \
+        -e POSTGRES_USER=tfstate -e POSTGRES_PASSWORD='${password}' -e POSTGRES_DB=tfstate \
+        ${registry}/postgres:17-alpine \
+        postgres -c ssl=on -c ssl_cert_file=/etc/tfstate/server.crt -c ssl_key_file=/etc/tfstate/server.key \
+                 -c hba_file=/etc/tfstate/pg_hba.conf
+  - path: /etc/cron.d/tfstate-backup
+    permissions: "0644"
+    content: |
+      # каждый час: копия всей БД state; хранится 48 последних
+      0 * * * * root mkdir -p /var/backups/tfstate && docker exec tfstate-db pg_dump -U tfstate tfstate | gzip > /var/backups/tfstate/tfstate-$(date +\%Y\%m\%d-\%H).sql.gz && ls -1t /var/backups/tfstate/*.sql.gz | tail -n +49 | xargs -r rm --
+runcmd:
+  - bash /opt/tfstate/start.sh > /var/log/start-tfstate.log 2>&1

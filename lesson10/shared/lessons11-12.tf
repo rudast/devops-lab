@@ -1,10 +1,12 @@
 # Занятия 11–12. ДЛЯ ПРЕПОДАВАТЕЛЯ: общие ресурсы курса, которые включаются переключателями.
 # Удобнее всего задать их в terraform.tfvars этой папки (в Git он не попадает):
 #
-#   state_bucket = "hse-devops-tfstate"   # перед занятием 11: бакет OBS для state студентов
-#   enable_nat   = true                   # перед занятием 12: выход в интернет для ВМ без публичного IP
+#   enable_state_db = true   # перед занятием 11: PostgreSQL для state студентов (файл state-db.tf)
+#   enable_nat      = true   # перед занятием 12: выход в интернет для ВМ без публичного IP
 #
 # затем  terraform plan && terraform apply.  Выключить NAT после занятия 12:  enable_nat = false → apply.
+#
+# state_bucket — запасной вариант: бакет OBS для backend "s3" (без блокировок). В занятиях не используется.
 
 variable "state_bucket" {
   description = "Имя бакета OBS для state студентов (пусто — не создавать). Имя должно быть уникальным во всём OBS"
@@ -18,7 +20,7 @@ variable "enable_nat" {
   default     = false
 }
 
-# ---------- Занятие 11: бакет для удалённого state ----------
+# ---------- Запасной вариант: бакет OBS для state (без блокировок, в занятиях не используется) ----------
 resource "sbercloud_obs_bucket" "state" {
   count = var.state_bucket == "" ? 0 : 1
 
