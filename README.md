@@ -31,7 +31,7 @@ lesson10/README.md        занятие 10: подготовка, практи�
 lesson10/practice/        ваша рабочая папка Terraform
 lesson10/steps/           шаги 01…05: data sources, firewall, SSH-ключ, ВМ + IP, nginx через cloud-init
 lesson10/terraform/       готовое решение занятия 10 (ответы)
-lesson10/shared/          общая сеть курса, бакет для state, NAT-шлюз (запускает преподаватель)
+lesson10/shared/          общая сеть курса, PostgreSQL для state, NAT-шлюз (запускает преподаватель)
 lesson10/ansible/         Ansible: Docker на ВМ и выкатка стека (понадобится позже)
 lesson11/modules/vm/      занятие 11: модуль «ВМ» (используется и в занятии 12)
 lesson11/practice/        занятие 11: рабочая папка — модуль, for_each, state в облаке
@@ -322,5 +322,5 @@ bash scripts/pull-images.sh
 cd lesson10/practice && terraform destroy && terraform state list   # пусто
 cd ../hw            && terraform destroy && terraform state list   # если делали ДЗ
 ```
-То же — в `lesson11/practice`, `lesson11/hw`, `lesson12/practice`, `lesson12/hw`. С занятия 11 state лежит в бакете, поэтому `destroy` можно сделать с любого ноутбука команды.
+То же — в `lesson11/practice`, `lesson11/hw`, `lesson12/practice`, `lesson12/hw`. С занятия 11 state лежит в базе курса, поэтому `destroy` можно сделать с любого ноутбука команды (`terraform init` → `terraform workspace select <workspace>` → `terraform destroy`).
 Остановить ВМ в консоли недостаточно: за диск и публичный IP облако продолжает брать деньги.
