@@ -47,7 +47,7 @@ resource "sbercloud_networking_secgroup_rule" "http" {
 
 resource "sbercloud_kps_keypair" "key" {
   name       = "${var.prefix}-l11-key"
-  public_key = file(pathexpand(var.ssh_public_key_path))
+  public_key = trimspace(file(pathexpand(var.ssh_public_key_path))) # trimspace — убрать перевод строки в конце файла
 }
 
 # ---------- Серверы: один модуль, столько копий, сколько строк в var.servers ----------
@@ -69,3 +69,10 @@ module "web" {
     name = "${var.prefix}-${each.key}"
   })
 }
+
+# Часть 6: после «state rm» ключ возвращают в state так (нужен один раз, потом блок можно удалить).
+# В готовом решении закомментирован: если ключа в облаке ещё нет, импортировать нечего.
+# import {
+#   to = sbercloud_kps_keypair.key
+#   id = "${var.prefix}-l11-key"
+# }
