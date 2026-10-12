@@ -1,6 +1,6 @@
 # Занятие 12. Кластер приложения в облаке: балансировщик, приватная сеть, отказоустойчивость
 
-Собираем всё вместе. Бэкенд из занятий 8–9 работает на **нескольких ВМ**, перед ними облачный **балансировщик** (тот же reverse proxy, что nginx на занятии 9, только как сервис облака). База — на отдельной ВМ. Серверы **не видны из интернета**: снаружи открыт только балансировщик. Код — модуль `vm` из занятия 11, state — в бакете OBS.
+Собираем всё вместе. Бэкенд из занятий 8–9 работает на **нескольких ВМ**, перед ними облачный **балансировщик** (тот же reverse proxy, что nginx на занятии 9, только как сервис облака). База — на отдельной ВМ. Серверы **не видны из интернета**: снаружи открыт только балансировщик. Код — модуль `vm` из занятия 11, state — в базе курса с блокировкой.
 
 ```
                     ┌──────────────── подсеть курса (192.168.8.0/22) ────────────────┐
@@ -21,7 +21,7 @@
 
 ## Подготовка
 
-- [ ] Занятие 11 пройдено: модуль `lesson11/modules/vm` на месте, вы умеете работать со state в бакете.
+- [ ] Занятие 11 пройдено: модуль `lesson11/modules/vm` на месте, вы умеете работать со state в базе курса (workspace).
 - [ ] Ресурсы занятия 11 и ДЗ удалены (`terraform state list` → пусто).
 - [ ] Обновите репозиторий: `cd devops-lab && git pull`, проверьте `ls lesson12` → `README.md HOMEWORK.md practice solution`.
 - [ ] Работаем **командами по 2 человека**: один «водитель» (запускает `apply` со своего ноутбука), второй «штурман» (читает план, смотрит консоль, ищет ответы в коде). Префикс команды — две фамилии: `ivanov-petrov`.
@@ -39,7 +39,7 @@ ls
 
 | Файл | Что внутри |
 |---|---|
-| `backend.tf` | state в бакете OBS (как в занятии 11) |
+| `backend.tf` | state в PostgreSQL курса (как в занятии 11) |
 | `variables.tf` | `prefix`, `app_count`, `db_password` (**sensitive**), тип ВМ |
 | `network.tf` | data-источники и **группы безопасности**: кто к кому может ходить |
 | `main.tf` | ключ, ВМ `db` и ВМ `app-1…N` — через модуль из занятия 11 |
@@ -63,12 +63,13 @@ grep -n TODO *.tf
 
 ```bash
 export SBC_ACCESS_KEY="…"  SBC_SECRET_KEY="…"
-export AWS_ACCESS_KEY_ID="$SBC_ACCESS_KEY"  AWS_SECRET_ACCESS_KEY="$SBC_SECRET_KEY"
+export PG_CONN_STR="…"                                  # строка подключения к базе state (как в занятии 11)
 export TF_VAR_db_password="$(openssl rand -hex 12)"    # пароль БД: только в переменной окружения
 echo "$TF_VAR_db_password"                              # сохраните его в менеджер паролей
 
 cp terraform.tfvars.example terraform.tfvars            # prefix команды
-terraform init -backend-config="key=<prefix>/lesson12.tfstate"
+terraform init
+terraform workspace new <prefix>-l12                    # state команды — в своём workspace
 terraform plan      # Plan: 17 to add — прочитайте его вдвоём
 terraform apply     # 2–3 минуты
 ```
@@ -145,7 +146,8 @@ terraform state list        # пусто
 | Все серверы в ELB *Unhealthy* дольше 10 минут | Нет правила на 8000 от `100.125.0.0/16` или порт не тот | Проверьте `network.tf` и `lb.tf` |
 | Серверы *Unhealthy*, правила верные | ВМ не смогли скачать пакеты или образы: нет выхода в интернет | Спросите преподавателя, включён ли NAT-шлюз курса; зайдите на ВМ и посмотрите лог (см. ниже) |
 | `curl $URL` → 503 `{"redis":"error…"}` | База ещё запускается или app не видит db | Подождать; проверить правило `db_from_app` |
-| `NoSuchBucket` / `AccessDenied` при init | Бакет или ключи | Как в [занятии 11](../lesson11/README.md#если-что-то-не-работает) |
+| Ошибки подключения к базе state при init, `Error acquiring the state lock` | `PG_CONN_STR`, блокировка | Как в [занятии 11](../lesson11/README.md#если-что-то-не-работает) |
+| `Работайте в своём workspace` при plan | Выбран общий workspace `default` | `terraform workspace select <prefix>-l12` (или `new`) |
 | `Quota exceeded` при apply | Кончились квоты общего проекта | `app_count = 2`, сообщить преподавателю |
 
 ### Как зайти на ВМ по SSH (отладка)
@@ -182,7 +184,7 @@ terraform state list       # пусто
 
 **Срок — до следующего занятия.** Как сдавать: заполните шаблон [HOMEWORK.md](HOMEWORK.md) (скопируйте, назовите `ДЗ-12-фамилия.md`) и отправьте файлом в чат группы. ДЗ можно делать той же командой: сдаёт каждый.
 
-Работайте в копии `cp -r practice hw`, state — отдельный: `-backend-config="key=<prefix>-hw/hw12.tfstate"`, `app_count = 2`.
+Работайте в копии `cp -r practice hw && cd hw && rm -rf .terraform`, state — отдельный: `terraform init` → `terraform workspace new <prefix>-hw12`, `app_count = 2`.
 
 1. **Jump-хост (bastion).** Добавьте маленькую ВМ `bastion` с публичным IP — через тот же модуль `vm`, `public_ip = true`.
    - Её группа безопасности пускает SSH только с **вашего** IP (`curl -s ifconfig.me`).
