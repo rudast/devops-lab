@@ -1,5 +1,10 @@
 output "zone" {
-  value = data.sbercloud_availability_zones.zones.names[0]
+  value = local.zone
+
+  precondition {
+    condition     = local.zone != null
+    error_message = "Типа ВМ ${var.vm_flavor} сейчас нет ни в одной зоне региона. Доступные типы ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ по зонам: ${join("; ", [for z, f in data.sbercloud_compute_flavors.by_zone : "${z}: ${join(", ", f.ids)}"])}"
+  }
 }
 
 output "image" {
@@ -8,11 +13,6 @@ output "image" {
 
 output "flavor" {
   value = var.vm_flavor
-
-  precondition {
-    condition     = contains(data.sbercloud_compute_flavors.vm.ids, var.vm_flavor)
-    error_message = "Типа ВМ ${var.vm_flavor} нет в зоне ${data.sbercloud_availability_zones.zones.names[0]}. Доступны ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ: ${join(", ", data.sbercloud_compute_flavors.vm.ids)}"
-  }
 }
 
 output "subnet" {

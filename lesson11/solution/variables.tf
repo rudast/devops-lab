@@ -26,7 +26,7 @@ variable "image_name_regex" {
   default     = "^Ubuntu 22.04 server 64bit$"
 }
 
-# ---------- Квоты курса: 15 ВМ, 30 vCPU, 60 ГБ RAM на всю группу ----------
+# ---------- Квоты курса: 30 ВМ, 30 vCPU, 60 ГБ RAM на всю группу — ровно по 1 vCPU на человека ----------
 variable "vm_flavor" {
   description = "Тип ВМ. В курсе разрешён только минимальный: s7n.medium.2 (1 vCPU / 2 ГБ)"
   type        = string
@@ -34,7 +34,7 @@ variable "vm_flavor" {
 
   validation {
     condition     = contains(["s7n.medium.2"], var.vm_flavor)
-    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ) — иначе не хватит квоты на всех."
+    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ): квота — 30 vCPU на всю группу."
   }
 }
 

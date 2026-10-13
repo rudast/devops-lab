@@ -9,7 +9,7 @@ resource "sbercloud_compute_instance" "vm" {
   name               = "${var.prefix}-vm"
   image_id           = data.sbercloud_images_image.ubuntu.id
   flavor_id          = var.vm_flavor
-  availability_zone  = data.sbercloud_availability_zones.zones.names[0]
+  availability_zone  = local.zone # зона из шага 1: та, где есть наш тип ВМ
   security_group_ids = [sbercloud_networking_secgroup.vm.id]
   key_pair           = TODO_KEY
 

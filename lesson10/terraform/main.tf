@@ -10,12 +10,19 @@ data "sbercloud_images_image" "ubuntu" {
   most_recent = true
 }
 
-# Тип ВМ (flavor) с нужным числом vCPU и памяти
-# (список всех типов с таким же числом vCPU и памяти в зоне — чтобы проверить, что наш тип там есть)
-data "sbercloud_compute_flavors" "vm" {
-  availability_zone = data.sbercloud_availability_zones.zones.names[0]
+# Типы ВМ в КАЖДОЙ зоне: в одной зоне нужный тип может закончиться, тогда apply упадёт
+data "sbercloud_compute_flavors" "by_zone" {
+  for_each          = toset(data.sbercloud_availability_zones.zones.names)
+  availability_zone = each.key
   cpu_core_count    = var.vm_cpu
   memory_size       = var.vm_ram
+}
+
+locals {
+  # Зоны, где наш тип ВМ сейчас есть, и «случайная», но стабильная зона — по хэшу префикса
+  zones_with_flavor = sort([for z, f in data.sbercloud_compute_flavors.by_zone : z if contains(f.ids, var.vm_flavor)])
+  zone_index        = parseint(substr(md5(var.prefix), 0, 6), 16)
+  zone              = length(local.zones_with_flavor) > 0 ? local.zones_with_flavor[local.zone_index % length(local.zones_with_flavor)] : null
 }
 
 # Общая подсеть курса — её создал преподаватель (lesson10/shared). Ищем по имени
@@ -61,7 +68,7 @@ resource "sbercloud_compute_instance" "vm" {
   name               = "${var.prefix}-vm"
   image_id           = data.sbercloud_images_image.ubuntu.id
   flavor_id          = var.vm_flavor
-  availability_zone  = data.sbercloud_availability_zones.zones.names[0]
+  availability_zone  = local.zone
   security_group_ids = [sbercloud_networking_secgroup.vm.id]
   key_pair           = sbercloud_kps_keypair.key.name
 
