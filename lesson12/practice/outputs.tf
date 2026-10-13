@@ -1,20 +1,36 @@
+output "zone" {
+  description = "Зона, которую выбрал хэш имени"
+  value       = local.zone
+}
+
+# ЧАСТЬ 6. Когда появится count, адрес будет sbercloud_vpc_eip.ip[0].address — а при count = 0 его нет.
+# Замените local.eip на one(sbercloud_vpc_eip.ip[*].address): «ноль или один элемент» → адрес или null.
+locals {
+  eip = sbercloud_vpc_eip.ip.address
+}
+
+output "private_ip" {
+  value = sbercloud_compute_instance.app.access_ip_v4
+}
+
+output "public_ip" {
+  value = local.eip
+}
+
 output "url" {
-  description = "Адрес сервиса — через балансировщик"
-  value       = "http://${sbercloud_vpc_eip.lb.address}/"
+  value = local.eip == null ? null : "http://${local.eip}/"
 }
 
-output "app_private_ips" {
-  value = { for k, vm in module.app : k => vm.private_ip }
+output "health_url" {
+  value = local.eip == null ? null : "http://${local.eip}/health"
 }
 
-output "db_private_ip" {
-  value = module.db.private_ip
+output "ssh_command" {
+  value = local.eip == null ? null : "ssh root@${local.eip}"
 }
 
-# Заполнено только при debug_public_ips = true
-output "debug_public_ips" {
-  value = var.debug_public_ips ? merge(
-    { db = module.db.public_ip },
-    { for k, vm in module.app : k => vm.public_ip }
-  ) : {}
+# Из занятия 11: sensitive-выход
+output "db_password" {
+  value     = var.db_password
+  sensitive = true
 }

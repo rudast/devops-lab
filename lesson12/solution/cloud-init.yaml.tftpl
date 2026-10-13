@@ -1,0 +1,58 @@
+#cloud-config
+# Выполняется ОДИН раз — при первом запуске ВМ. Поднимает стек занятия 9:
+# nginx (порт 80) → backend (×${backend_count}) → PostgreSQL + Redis, всё в Docker Compose.
+# Конструкции $${имя} — подстановки Terraform (templatefile), значения приходят из main.tf.
+# Обычные переменные bash здесь пишем без фигурных скобок ($img), чтобы Terraform их не трогал.
+
+package_update: true
+packages:
+  - docker.io
+  - git
+
+write_files:
+  # .env для docker-compose.yml занятия 9. Пароль — из TF_VAR_db_password, в Git его нет.
+  - path: /opt/app.env
+    permissions: "0600"
+    content: |
+      POSTGRES_USER=app
+      POSTGRES_PASSWORD=${db_password}
+      POSTGRES_DB=appdb
+      APP_VERSION=lesson-12
+      HTTP_PORT=80
+
+  - path: /opt/start-app.sh
+    permissions: "0700"
+    content: |
+      #!/bin/bash
+      set -euo pipefail   # без -x: иначе пароль попадёт в лог
+      echo "== $(date) старт: ${name}"
+
+      systemctl enable --now docker
+
+      # docker compose (v2): пакет Ubuntu, а если его нет — бинарник с GitHub
+      if ! docker compose version >/dev/null 2>&1; then
+        apt-get install -y docker-compose-v2 || {
+          mkdir -p /usr/local/lib/docker/cli-plugins
+          curl -fsSL https://github.com/docker/compose/releases/download/v2.29.7/docker-compose-linux-x86_64 \
+            -o /usr/local/lib/docker/cli-plugins/docker-compose
+          chmod +x /usr/local/lib/docker/cli-plugins/docker-compose
+        }
+      fi
+      docker compose version
+
+      # Образы — из нашего реестра, под привычными именами (как scripts/pull-images.sh)
+      for img in postgres:17-alpine redis:7-alpine nginx:1.27-alpine python:3.12-slim; do
+        docker pull "${registry}/$img"
+        docker tag  "${registry}/$img" "$img"
+      done
+
+      git clone --depth 1 ${repo_url} /opt/devops-lab
+      cp /opt/app.env /opt/devops-lab/lesson09/.env
+
+      cd /opt/devops-lab/lesson09
+      docker compose up -d --build --scale backend=${backend_count}
+      docker compose ps
+      echo "== $(date) готово: приложение на порту 80"
+
+runcmd:
+  - bash /opt/start-app.sh > /var/log/start-app.log 2>&1

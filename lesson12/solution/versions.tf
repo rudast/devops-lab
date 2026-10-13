@@ -1,7 +1,8 @@
-# Занятие 12 — ГОТОВОЕ РЕШЕНИЕ: кластер приложения за балансировщиком.
+# Занятие 12 — ГОТОВОЕ РЕШЕНИЕ: так выглядит practice после всех частей.
+# Сначала попробуйте сами в lesson12/practice — сюда подглядывайте, если застряли.
 
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.5" # блок import (часть 4) появился в 1.5
 
   required_providers {
     sbercloud = {
@@ -11,7 +12,7 @@ terraform {
   }
 }
 
-# Ключи — только из переменных окружения SBC_ACCESS_KEY / SBC_SECRET_KEY
+# Ключи доступа — только из переменных окружения SBC_ACCESS_KEY / SBC_SECRET_KEY
 provider "sbercloud" {
   auth_url = "https://iam.ru-moscow-1.hc.sbercloud.ru/v3"
   region   = var.region

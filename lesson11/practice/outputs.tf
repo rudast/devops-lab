@@ -1,28 +1,32 @@
-# ЧАСТЬ 1: один сервер — один IP.
-# В ЧАСТИ 3 (for_each) закомментируйте эти два выхода: module.web станет картой серверов.
+output "zone" {
+  description = "Зона, которую выбрал хэш имени"
+  value       = local.zone
+}
+
 output "public_ip" {
-  value = module.web.public_ip
+  value = sbercloud_vpc_eip.ip.address
 }
 
 output "url" {
-  value = "http://${module.web.public_ip}/" # ЧАСТЬ 2: замените на module.web.url
+  value = "http://${sbercloud_vpc_eip.ip.address}/"
 }
 
-# ЧАСТЬ 4: выходы для нескольких серверов. Раскомментируйте и замените TODO на for-выражения.
-# module.web — карта: { "web-1" = <выходы модуля>, "web-2" = <выходы модуля> }
-#
-# output "public_ips" {
-#   value = TODO # карта «имя → публичный IP»:  { "web-1" = "1.2.3.4", … }
-# }
-#
-# output "urls" {
-#   value = TODO # список адресов страниц — из выхода url модуля
-# }
-#
-# output "big_disks" {
-#   value = TODO # имена серверов из var.servers, у которых disk_size > 10 (for … if …)
-# }
-#
-# output "servers_count" {
-#   value = TODO # сколько серверов (функция length)
+output "health_url" {
+  value = "http://${sbercloud_vpc_eip.ip.address}/health"
+}
+
+output "ssh_command" {
+  value = "ssh root@${sbercloud_vpc_eip.ip.address}"
+}
+
+# Как следить за запуском приложения на ВМ
+output "logs_command" {
+  value = "ssh root@${sbercloud_vpc_eip.ip.address} tail -f /var/log/start-app.log"
+}
+
+# ЧАСТЬ 5: выход с паролем. Раскомментируйте и посмотрите terraform output и terraform output -raw db_password.
+# Попробуйте убрать строку sensitive — что скажет Terraform?
+# output "db_password" {
+#   value     = var.db_password
+#   sensitive = true
 # }

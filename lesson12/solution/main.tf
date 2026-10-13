@@ -1,64 +1,166 @@
-resource "sbercloud_kps_keypair" "key" {
-  name       = "${var.prefix}-l12-key"
-  public_key = file(pathexpand(var.ssh_public_key_path))
+# Занятие 12 — ГОТОВОЕ РЕШЕНИЕ: так выглядит practice после всех частей.
+# Инфраструктура та же, что на занятии 11 (ВМ с приложением). Новое — приёмы повседневной работы:
+# переименование через state mv, импорт, lifecycle, выключатель публичного IP через count.
 
-  # Workspace default в базе state — общий для всех. Работаем только в своём.
+# ---------- Data sources: читаем облако ----------
+data "sbercloud_availability_zones" "all" {}
+
+data "sbercloud_images_image" "ubuntu" {
+  name_regex  = var.image_name_regex
+  visibility  = "public"
+  most_recent = true
+}
+
+# Типы ВМ в КАЖДОЙ зоне: for_each по зонам — одна копия data-источника на зону
+data "sbercloud_compute_flavors" "zone" {
+  for_each          = toset(data.sbercloud_availability_zones.all.names)
+  availability_zone = each.key
+}
+
+data "sbercloud_vpc_subnet" "course" {
+  name = var.subnet_name
+}
+
+locals {
+  name = "${var.prefix}-app"
+
+  # Зоны, где наш тип ВМ сейчас есть (в «распроданной» зоне apply упал бы)
+  zones = sort([for z, f in data.sbercloud_compute_flavors.zone : z if contains(f.ids, var.vm_flavor)])
+
+  # «Случайная», но стабильная зона: число из хэша имени ВМ → номер зоны.
+  # Одно и то же имя → всегда одна зона; разные команды → разные зоны.
+  hash = parseint(substr(md5(local.name), 0, 6), 16)
+  zone = length(local.zones) > 0 ? local.zones[local.hash % length(local.zones)] : null
+
+  tags = {
+    course = "hse-devops"
+    owner  = var.prefix
+    lesson = "12"
+  }
+}
+
+# ---------- Группа безопасности: SSH (22) и HTTP (80) ----------
+resource "sbercloud_networking_secgroup" "app" {
+  name        = "${var.prefix}-app-sg"
+  description = "Lesson 12: ${var.prefix}"
+}
+
+resource "sbercloud_networking_secgroup_rule" "ssh" {
+  security_group_id = sbercloud_networking_secgroup.app.id
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 22
+  port_range_max    = 22
+  remote_ip_prefix  = var.allowed_ssh_cidr
+
+  # Часть 5. Правило нельзя изменить — только пересоздать. Сначала создать новое, потом удалить старое:
+  # SSH не пропадает ни на секунду. В плане вместо -/+ будет +/-.
   lifecycle {
+    create_before_destroy = true
+  }
+}
+
+resource "sbercloud_networking_secgroup_rule" "http" {
+  security_group_id = sbercloud_networking_secgroup.app.id
+  direction         = "ingress"
+  ethertype         = "IPv4"
+  protocol          = "tcp"
+  port_range_min    = 80
+  port_range_max    = 80
+  remote_ip_prefix  = "0.0.0.0/0"
+}
+
+# ---------- SSH-ключ ----------
+# Часть 2. Ресурс переименован: было "key", стало "ssh". Чтобы Terraform не пересоздал ключ,
+# запись в state переносят командой  terraform state mv sbercloud_kps_keypair.key sbercloud_kps_keypair.ssh
+# или описывают переезд в коде блоком moved (ниже).
+resource "sbercloud_kps_keypair" "ssh" {
+  name       = "${var.prefix}-l12-key"
+  public_key = trimspace(file(pathexpand(var.ssh_public_key_path)))
+}
+
+# ---------- ВМ с приложением ----------
+resource "sbercloud_compute_instance" "app" {
+  name               = local.name
+  image_id           = data.sbercloud_images_image.ubuntu.id
+  flavor_id          = var.vm_flavor
+  availability_zone  = local.zone
+  security_group_ids = [sbercloud_networking_secgroup.app.id]
+  key_pair           = sbercloud_kps_keypair.ssh.name
+
+  # cloud-init: Docker → код курса → .env с паролем → docker compose up. Только при ПЕРВОМ запуске ВМ.
+  # Поменяли что-то внутри user_data → нужна новая ВМ: terraform apply -replace=sbercloud_compute_instance.app
+  user_data = templatefile("${path.module}/cloud-init.yaml.tftpl", {
+    name          = local.name
+    repo_url      = var.repo_url
+    registry      = var.registry
+    db_password   = var.db_password
+    backend_count = var.backend_count
+  })
+
+  system_disk_type = "SAS"
+  system_disk_size = data.sbercloud_images_image.ubuntu.min_disk_gb # минимум образа — квота на диски общая
+
+  network {
+    uuid = data.sbercloud_vpc_subnet.course.id
+  }
+
+  tags = local.tags
+
+  lifecycle {
+    # Список зон и «свежий» образ со временем меняются. ВМ из-за этого пересоздаваться не должна.
+    ignore_changes = [availability_zone, image_id]
+
     precondition {
-      condition     = terraform.workspace != "default"
-      error_message = "Работайте в своём workspace: terraform workspace new <prefix>-l12 (или select)."
+      condition     = local.zone != null
+      error_message = "Тип ВМ ${var.vm_flavor} сейчас недоступен ни в одной зоне. Сообщите преподавателю."
     }
   }
 }
 
-# ---------- База данных: одна ВМ, без публичного IP ----------
-module "db" {
-  source = "../../lesson11/modules/vm" # тот же модуль, что в занятии 11
+# ---------- Публичный IP — отдельный ресурс: переживёт пересоздание ВМ ----------
+# Часть 6. count = 1 или 0 — «выключатель»: public_ip = false → IP не создаётся (или удаляется).
+resource "sbercloud_vpc_eip" "ip" {
+  count = var.public_ip ? 1 : 0
 
-  name               = "${var.prefix}-db"
-  image_id           = data.sbercloud_images_image.ubuntu.id
-  flavor             = var.vm_flavor
-  availability_zone  = local.zone
-  subnet_id          = data.sbercloud_vpc_subnet.course.id
-  security_group_ids = [sbercloud_networking_secgroup.db.id]
-  key_pair           = sbercloud_kps_keypair.key.name
-  disk_size          = data.sbercloud_images_image.ubuntu.min_disk_gb
-  public_ip          = var.debug_public_ips
-  tags               = merge(local.tags, { role = "db" })
+  name = "${var.prefix}-l12-eip"
 
-  user_data = templatefile("${path.module}/cloud-init-db.yaml.tftpl", {
-    registry    = var.mirror_registry
-    db_password = var.db_password
-  })
+  publicip {
+    type = "5_bgp"
+  }
+
+  bandwidth {
+    name        = "${var.prefix}-l12-bw"
+    share_type  = "PER"
+    size        = 5
+    charge_mode = "traffic"
+  }
+
+  # Часть 5. Защита от случайного удаления: destroy этого ресурса упадёт с ошибкой,
+  # пока строка на месте. В конце занятия (часть 7) её придётся убрать — это и есть смысл.
+  lifecycle {
+    prevent_destroy = true
+  }
 }
 
-# ---------- Серверы приложения: app-1 … app-N ----------
-# range(2) = [0, 1]  →  {"app-1", "app-2"}. Поменяли app_count — добавился/удалился сервер.
-locals {
-  app_names = toset([for i in range(var.app_count) : "app-${i + 1}"])
+resource "sbercloud_compute_eip_associate" "ip_to_vm" {
+  count = var.public_ip ? 1 : 0
+
+  public_ip   = sbercloud_vpc_eip.ip[0].address
+  instance_id = sbercloud_compute_instance.app.id
 }
 
-module "app" {
-  source   = "../../lesson11/modules/vm"
-  for_each = local.app_names
+# Часть 2, вариант «в коде»: тот же переезд, что state mv, но через Git и ревью.
+# После apply блок можно удалить.
+# moved {
+#   from = sbercloud_kps_keypair.key
+#   to   = sbercloud_kps_keypair.ssh
+# }
 
-  name               = "${var.prefix}-${each.key}"
-  image_id           = data.sbercloud_images_image.ubuntu.id
-  flavor             = var.vm_flavor
-  availability_zone  = local.zone
-  subnet_id          = data.sbercloud_vpc_subnet.course.id
-  security_group_ids = [sbercloud_networking_secgroup.app.id]
-  key_pair           = sbercloud_kps_keypair.key.name
-  disk_size          = data.sbercloud_images_image.ubuntu.min_disk_gb
-  public_ip          = var.debug_public_ips
-  tags               = merge(local.tags, { role = "app" })
-
-  # Адрес базы берём из выхода модуля db — Terraform сам создаст db раньше app
-  user_data = templatefile("${path.module}/cloud-init-app.yaml.tftpl", {
-    name        = "${var.prefix}-${each.key}"
-    registry    = var.mirror_registry
-    repo_url    = var.repo_url
-    db_ip       = module.db.private_ip
-    db_password = var.db_password
-  })
-}
+# Часть 4. «Потерянный» ресурс: после terraform state rm ключ возвращают в state блоком import
+# (нужен один раз, потом блок удаляют). ID ключа в cloud.ru — его имя.
+# import {
+#   to = sbercloud_kps_keypair.ssh
+#   id = "${var.prefix}-l12-key"
+# }

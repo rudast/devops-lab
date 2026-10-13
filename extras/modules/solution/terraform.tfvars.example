@@ -1,0 +1,9 @@
+# cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars в Git не попадает)
+prefix = "ivanov-petrov"     # ← фамилии команды латиницей, строчными, через дефис
+
+# Часть 2: проверка квоты — две ВМ на команду должны дать ошибку в plan.
+# Часть 3: оставьте ОДИН сервер.
+# servers = {
+#   "web-1" = {}
+#   "web-2" = {}
+# }

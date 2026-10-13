@@ -1,7 +1,7 @@
-# Занятие 11. Стартовая папка практики. Порядок работы — в README, части 1–9.
+# Занятие 11. Стартовая папка практики. Порядок работы — в README, части 1–7.
 
 terraform {
-  required_version = ">= 1.6"
+  required_version = ">= 1.5"
 
   required_providers {
     sbercloud = {
@@ -11,7 +11,7 @@ terraform {
   }
 }
 
-# Ключи — только из переменных окружения SBC_ACCESS_KEY / SBC_SECRET_KEY
+# Ключи доступа — только из переменных окружения SBC_ACCESS_KEY / SBC_SECRET_KEY
 provider "sbercloud" {
   auth_url = "https://iam.ru-moscow-1.hc.sbercloud.ru/v3"
   region   = var.region

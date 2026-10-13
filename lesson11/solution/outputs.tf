@@ -1,22 +1,31 @@
-# Карта «сервер => публичный IP». for-выражение собирает её из всех копий модуля.
-output "public_ips" {
-  value = { for k, vm in module.web : k => vm.public_ip }
+output "zone" {
+  description = "Зона, которую выбрал хэш имени"
+  value       = local.zone
 }
 
-# Если в части 2 вы добавили в модуль выход url, можно короче: [for vm in module.web : vm.url]
-output "urls" {
-  value = [for vm in module.web : "http://${vm.public_ip}/"]
+output "public_ip" {
+  value = sbercloud_vpc_eip.ip.address
 }
 
-# for с фильтром if: только серверы с большим диском
-output "big_disks" {
-  value = [for name, s in var.servers : name if s.disk_size > 10]
+output "url" {
+  value = "http://${sbercloud_vpc_eip.ip.address}/"
 }
 
-output "servers_count" {
-  value = length(module.web)
+output "health_url" {
+  value = "http://${sbercloud_vpc_eip.ip.address}/health"
 }
 
-output "ssh_commands" {
-  value = { for k, vm in module.web : k => "ssh root@${vm.public_ip}" }
+output "ssh_command" {
+  value = "ssh root@${sbercloud_vpc_eip.ip.address}"
+}
+
+# Как следить за запуском приложения на ВМ
+output "logs_command" {
+  value = "ssh root@${sbercloud_vpc_eip.ip.address} tail -f /var/log/start-app.log"
+}
+
+# Часть 5: sensitive-выход. terraform output покажет <sensitive>, а terraform output -raw db_password — значение.
+output "db_password" {
+  value     = var.db_password
+  sensitive = true
 }

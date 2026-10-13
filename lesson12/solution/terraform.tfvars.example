@@ -1,9 +1,12 @@
 # cp terraform.tfvars.example terraform.tfvars   (terraform.tfvars в Git не попадает)
-prefix = "ivanov-petrov"     # ← префикс команды: фамилии латиницей через дефис
+prefix = "ivanov-petrov"     # ← фамилии команды латиницей, строчными, через дефис
 
-# app_count = 2              # сколько серверов приложения за балансировщиком (1–4)
 
-# debug_public_ips = true    # нужно зайти на ВМ по SSH? true → apply; после отладки — обратно false
+# Часть 5: SSH только с вашего IP (правило пересоздаётся — смотрим порядок в плане)
+# allowed_ssh_cidr = "203.0.113.25/32"
 
-# Пароль БД — НЕ здесь, а в переменной окружения:
+# Часть 6: выключатель публичного IP
+# public_ip = false
+
+# Пароль базы СЮДА НЕ ПИШЕМ. Только переменная окружения:
 #   export TF_VAR_db_password="$(openssl rand -hex 12)"
