@@ -83,7 +83,7 @@ variable "backend_count" {
 variable "db_password" {
   description = "Пароль PostgreSQL (только латинские буквы и цифры, не короче 12 символов)"
   type        = string
-  # sensitive   = true
+  sensitive   = true
 
   validation {
     condition     = can(regex("^[A-Za-z0-9]{12,}$", var.db_password))

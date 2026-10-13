@@ -92,8 +92,8 @@ resource "sbercloud_compute_instance" "app" {
     name          = local.name
     repo_url      = var.repo_url
     registry      = var.registry
-    db_password   = TODO
-    backend_count = TODO
+    db_password   = var.db_password
+    backend_count = var.backend_count
   })
 
   system_disk_type = "SAS"
