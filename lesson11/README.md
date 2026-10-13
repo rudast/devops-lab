@@ -144,17 +144,24 @@ curl -X POST -H 'Content-Type: application/json' \
 
 `sensitive` скрывает значение **с экрана**. Проверим, где пароль на самом деле лежит.
 
-**1. Выход.** Раскомментируйте в `outputs.tf` выход `db_password`, сделайте `terraform apply` (изменятся только выходы), затем:
+**1. Output.** Раскомментируйте в `outputs.tf` блок `output "db_password"` и выполните `terraform apply` (изменятся только outputs), затем:
 
 ```bash
-terraform output                      # db_password = <sensitive>
-terraform output -raw db_password     # а так — виден
+terraform output                      # db_password = <sensitive>  — значение скрыто
+terraform output -raw db_password     # а так пароль виден целиком
 ```
 
-Уберите у выхода строку `sensitive = true` и запустите `terraform plan`: Terraform откажется — выход ссылается на секрет и тоже должен быть помечен. Верните строку.
+Теперь удалите в этом блоке строку `sensitive = true` и запустите `terraform plan`. Terraform выдаст ошибку: output ссылается на переменную, помеченную как `sensitive`, поэтому сам output тоже обязан быть помечен `sensitive = true`. Верните строку на место.
 
+**2. State.**
 
-**2. ВМ.** Зайдите по SSH:
+```bash
+grep -c "$TF_VAR_db_password" terraform.tfstate     # больше нуля — пароль в state открытым текстом
+```
+
+Найдите, в каком месте state он лежит (`grep -n`). Значения outputs хранятся в state открытым текстом, даже помеченные `sensitive`. Поэтому state — секретный файл: в Git его нельзя, а в команде доступ к нему — как к паролям.
+
+**3. ВМ.** Зайдите по SSH:
 
 ```bash
 cat /opt/app.env | grep PASSWORD
@@ -231,7 +238,7 @@ terraform state list       # пусто
 | `Invalid value for variable` … `db_password` | В пароле спецсимволы или он короче 12 | Сгенерируйте `openssl rand -hex 12` |
 | `Invalid reference` … `TODO` | Не выполнено задание части 2 | Подставьте `var.db_password` и `var.backend_count` |
 | `Invalid template interpolation value` / `vars map does not contain key` | В карте `templatefile` нет переменной, которая есть в шаблоне | Сверьте пять подстановок `${…}` с картой |
-| `Output refers to sensitive values` | У выхода с паролем нет `sensitive = true` | Верните `sensitive = true` |
+| `Output refers to sensitive values` | У output с паролем нет `sensitive = true` | Добавьте `sensitive = true` в блок output |
 | `Invalid value for variable` … `s7n.medium.2` | Задан другой тип ВМ | Оставьте `vm_flavor` по умолчанию |
 | `Quota exceeded` при apply | Кончились vCPU/ВМ в проекте — чьи-то ВМ не удалены | Сообщите преподавателю; проверьте, что ВМ занятия 10 удалена |
 | `cloud-init status` → `error` | Скрипт запуска упал | `tail -50 /var/log/start-app.log` — ищите последнюю ошибку |
@@ -259,7 +266,7 @@ terraform state list       # пусто
 
 1. **Версия приложения.** Добавьте переменную `app_version` (строка, по умолчанию `"lesson-11"`) и передайте её в шаблон вместо `lesson-11` в строке `APP_VERSION`. Приложите изменённые места трёх файлов (`variables.tf`, `main.tf`, `cloud-init.yaml.tftpl`) и итоговую строку `terraform plan`.
 2. **Проверка SSH.** Добавьте к `allowed_ssh_cidr` `validation`: значение должно быть корректным CIDR (подсказка: `can(cidrhost(var.allowed_ssh_cidr, 0))`). Покажите ошибку `plan` для `allowed_ssh_cidr = "мой-ip"` и успешный `plan` для `"203.0.113.25/32"`.
-3. **Выход `notes_url`.** Добавьте выход с адресом страницы заметок. Что показывает `plan` для него и почему?
+3. **Output `notes_url`.** Добавьте output с адресом страницы заметок. Что показывает `plan` для него и почему?
 4. **Вопросы (письменно, коротко):**
    - Почему после `backend_count = 2` и `apply` копий бэкенда не прибавилось? Что сделал `-replace` и что при этом потерялось?
    - Где в итоге хранится пароль базы: перечислите все места, которые нашли в части 5. Что из этого защищает `sensitive = true`, а что — нет?

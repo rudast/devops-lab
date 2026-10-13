@@ -24,7 +24,7 @@ output "logs_command" {
   value = "ssh root@${sbercloud_vpc_eip.ip.address} tail -f /var/log/start-app.log"
 }
 
-# Часть 5: sensitive-выход. terraform output покажет <sensitive>, а terraform output -raw db_password — значение.
+# Часть 5: output с паролем. terraform output покажет <sensitive>, а terraform output -raw db_password — само значение.
 output "db_password" {
   value     = var.db_password
   sensitive = true

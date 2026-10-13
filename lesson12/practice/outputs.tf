@@ -29,7 +29,7 @@ output "ssh_command" {
   value = local.eip == null ? null : "ssh root@${local.eip}"
 }
 
-# Из занятия 11: sensitive-выход
+# Из занятия 11: output с паролем, помеченный sensitive
 output "db_password" {
   value     = var.db_password
   sensitive = true

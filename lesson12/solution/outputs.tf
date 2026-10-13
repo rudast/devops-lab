@@ -3,7 +3,7 @@ output "zone" {
   value       = local.zone
 }
 
-# Часть 6. Когда публичного IP нет (count = 0), выходы отдают null, а не падают.
+# Часть 6. Когда публичного IP нет (count = 0), outputs возвращают null, а не падают с ошибкой.
 # one(...) — «ноль или один элемент»: вернёт элемент или null.
 locals {
   eip = one(sbercloud_vpc_eip.ip[*].address)
@@ -29,7 +29,7 @@ output "ssh_command" {
   value = local.eip == null ? null : "ssh root@${local.eip}"
 }
 
-# Из занятия 11: sensitive-выход
+# Из занятия 11: output с паролем, помеченный sensitive
 output "db_password" {
   value     = var.db_password
   sensitive = true

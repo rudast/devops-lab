@@ -50,9 +50,9 @@
 
 ```
 
-## 3. Выход notes_url
+## 3. Output notes_url
 
-Выход из `outputs.tf`:
+Добавьте в `outputs.tf`:
 ```hcl
 
 ```
