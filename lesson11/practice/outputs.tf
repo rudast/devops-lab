@@ -26,7 +26,7 @@ output "logs_command" {
 
 # ЧАСТЬ 5: output с паролем. Раскомментируйте и сравните вывод terraform output и terraform output -raw db_password.
 # Попробуйте убрать строку sensitive — что скажет Terraform?
-output "db_password" {
-  value     = var.db_password
-  #sensitive = true
-}
+# output "db_password" {
+#   value     = var.db_password
+#   sensitive = true
+# }
