@@ -19,6 +19,7 @@ var.servers = {        │  data: образ, подсеть      resource: fire
 ## Подготовка
 
 - [ ] Занятие 10 пройдено: Terraform установлен, `~/.terraformrc` настроен, SSH-ключ есть ([подготовка занятия 10](../lesson10/README.md#подготовка)).
+- [ ] `terraform version` — **1.6 или новее** (блок `import` в части 6 и `required_version` в коде). Старше — поставьте новую версию с зеркала, как в занятии 10.
 - [ ] После занятия 10 вы сделали `terraform destroy` — проверьте: `cd lesson10/practice && terraform state list` → пусто.
 - [ ] Обновите репозиторий:
   ```bash
@@ -344,6 +345,7 @@ terraform state list       # пусто
 
 | Симптом | Причина | Решение |
 |---|---|---|
+| `Unsupported Terraform Core version` | Terraform старше 1.6 | Поставить новую версию с зеркала (README занятия 10) |
 | `Module not installed` | Добавили или изменили модуль без init | `terraform init` |
 | `Unreadable module directory` / `source` не найден | Неверный путь в `source` | `source = "../modules/vm"` — путь от папки `practice` |
 | `Invalid reference` в `subnet_id`/`key_pair` | Пропущена часть адреса | `data.<тип>.<имя>.id`, `<тип>.<имя>.name` |
