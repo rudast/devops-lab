@@ -153,15 +153,8 @@ terraform output -raw db_password     # а так — виден
 
 Уберите у выхода строку `sensitive = true` и запустите `terraform plan`: Terraform откажется — выход ссылается на секрет и тоже должен быть помечен. Верните строку.
 
-**2. State.**
 
-```bash
-grep -c "$TF_VAR_db_password" terraform.tfstate     # больше нуля — пароль в state открытым текстом
-```
-
-Найдите, в каком месте state он лежит (`grep -n`). Выходы хранятся в state как есть, даже помеченные `sensitive`. Поэтому state — секретный файл: в Git его нельзя, а в команде доступ к нему — как к паролям.
-
-**3. ВМ.** Зайдите по SSH:
+**2. ВМ.** Зайдите по SSH:
 
 ```bash
 cat /opt/app.env | grep PASSWORD
