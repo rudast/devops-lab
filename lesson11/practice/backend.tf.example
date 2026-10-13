@@ -1,4 +1,4 @@
-# Часть 3. Скопируйте в backend.tf:  cp backend.tf.example backend.tf
+# Часть 7. Скопируйте в backend.tf:  cp backend.tf.example backend.tf
 #
 # State хранится в PostgreSQL курса (бэкенд "pg"). На время plan/apply Terraform ставит
 # блокировку: второй человек в тот же state получит «Error acquiring the state lock».
