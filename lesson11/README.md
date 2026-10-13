@@ -42,6 +42,21 @@ http://<публичный IP>/  →  nginx:80  →  backend ×N  →  PostgreSQ
 
 Ключи доступа преподаватель даст на занятии, как и в прошлый раз.
 
+## Две машины: где какую команду выполнять
+
+На занятии вы работаете с **двумя** машинами, и важно не путать, где вы сейчас находитесь:
+
+| | 💻 Рабочая машина | ☁️ ВМ приложения |
+|---|---|---|
+| Что это | ваш ноутбук (или сервер, на котором стоит Terraform) | ВМ `<prefix>-app`, которую создаст `terraform apply` |
+| Что здесь есть | Terraform, клон `devops-lab`, ключи `SBC_*`, пароль `TF_VAR_db_password` | Docker, клон `devops-lab` в `/opt`, запущенное приложение |
+| Какие команды | `terraform …`, `curl` к публичному IP, `ssh root@…` | `cloud-init status`, `docker compose …`, `tail /var/log/start-app.log` |
+| Как понять, где я | приглашение вашего ноутбука/сервера, например `user@laptop:~/devops-lab/lesson11/practice$` | приглашение `root@<prefix>-app:~#` |
+
+Каждый блок команд ниже подписан: **💻** — выполнять на рабочей машине в каталоге `lesson11/practice`, **☁️** — на ВМ приложения, зайдя на неё по SSH. Файлы `/var/log/start-app.log`, `/opt/app.env`, каталог `/opt/devops-lab` существуют **только на ВМ приложения** — на рабочей машине их нет и быть не должно.
+
+Удобнее всего держать открытыми **два окна терминала**: в первом — рабочая машина с Terraform, во втором — SSH-сессия на ВМ приложения.
+
 ## Практика
 
 90 минут, семь частей. Застряли больше чем на 5 минут — подсмотрите в `solution/` и двигайтесь дальше.
@@ -58,8 +73,10 @@ http://<публичный IP>/  →  nginx:80  →  backend ×N  →  PostgreSQ
 
 ### Часть 1. Подготовка (10 мин)
 
+💻 Рабочая машина:
+
 ```bash
-cd lesson11/practice
+cd devops-lab/lesson11/practice
 export SBC_ACCESS_KEY="…"  SBC_SECRET_KEY="…"         # ключи от преподавателя
 cp terraform.tfvars.example terraform.tfvars           # впишите prefix команды: ivanov-petrov
 export TF_VAR_db_password="$(openssl rand -hex 12)"    # пароль базы — 24 случайных символа
@@ -67,13 +84,15 @@ echo ${#TF_VAR_db_password}                            # 24 — длина, са
 terraform init
 ```
 
-`TF_VAR_<имя>` — так Terraform читает переменную из окружения. Пароль не лежит ни в одном файле: ни в Git, ни в `terraform.tfvars`. Как и `export` ключей, он живёт только в этом окне терминала.
+`TF_VAR_<имя>` — так Terraform читает значение переменной из окружения: переменной `db_password` в коде соответствует переменная окружения `TF_VAR_db_password`. Пароль не лежит ни в одном файле: ни в Git, ни в `terraform.tfvars`. Как и `export` ключей доступа, он живёт только в **этом окне терминала**: откроете новое окно — экспортируйте заново (и ключи, и пароль), иначе `terraform plan` попросит ввести `db_password` вручную.
 
 > Откройте `variables.tf` и найдите проверку у `db_password`: только латинские буквы и цифры, не короче 12. Почему так строго? Пароль попадёт в строку подключения `postgresql://app:<пароль>@db:5432/appdb`, и символы `@`, `:` или `/` её сломают.
 
 ### Часть 2. Шаблон cloud-init и templatefile (15 мин)
 
-Вся настройка ВМ — в одном файле. Прочитайте его вдвоём:
+Вся настройка ВМ — в одном файле `cloud-init.yaml.tftpl`. Это шаблон: Terraform подставит в него значения и передаст готовый текст облаку, а облако отдаст его ВМ при первом запуске. Прочитайте его вдвоём.
+
+💻 Рабочая машина:
 
 ```bash
 cat cloud-init.yaml.tftpl
@@ -86,16 +105,20 @@ cat cloud-init.yaml.tftpl
 | `write_files` → `/opt/start-app.sh` | скрипт запуска: Docker Compose, образы из реестра курса, `git clone`, `docker compose up` |
 | `runcmd` | запускает скрипт и пишет лог в `/var/log/start-app.log` |
 
-Найдите все подстановки `${…}` — их пять. Значения для них передаёт `templatefile` в `main.tf`. Три уже есть, **два `TODO` допишите** (подсказка — в комментарии над ними):
+Найдите все подстановки `${…}` — их пять: `name`, `repo_url`, `registry`, `db_password`, `backend_count`. Значения для них передаёт функция `templatefile(...)` в `main.tf` — вторым аргументом, в виде карты «имя в шаблоне = значение». Три значения уже вписаны, **два `TODO` допишите** (подсказка — в комментарии над ними). Обратите внимание: в шаблоне доступны **только** ключи этой карты, написать внутри шаблона `var.db_password` нельзя.
+
+💻 Рабочая машина:
 
 ```bash
-grep -n TODO main.tf
+grep -n TODO main.tf  # две строки: db_password = TODO, backend_count = TODO
 terraform plan        # Plan: 7 to add (группа + 2 правила, ключ, ВМ, IP, привязка)
 ```
 
+Если `plan` ругается `Invalid reference` на слово `TODO` — вы ещё не заменили его на `var.db_password` и `var.backend_count`.
+
 Найдите в плане строку `user_data`. Там не текст шаблона, а длинная строка из букв и цифр. Это **хэш**: провайдер хранит в state только отпечаток `user_data`, чтобы заметить изменения, а сам текст — нет.
 
-Теперь в `variables.tf` раскомментируйте у `db_password` строку `sensitive = true` и снова `terraform plan`:
+Теперь в `variables.tf` найдите переменную `db_password`, раскомментируйте в ней строку `sensitive = true` и снова выполните `terraform plan`. Строка `user_data` в плане изменится:
 
 ```
 + user_data = (sensitive value)
@@ -105,30 +128,52 @@ Terraform помечает **всё, что вычислено из секрет
 
 ### Часть 3. apply и наблюдаем (20 мин)
 
+💻 Рабочая машина:
+
 ```bash
-terraform apply       # ВМ создаётся 1–2 минуты
-terraform output      # zone, public_ip, url, ssh_command, logs_command
+terraform apply       # введите yes; ВМ создаётся 1–2 минуты
+terraform output      # zone, public_ip, url, health_url, ssh_command, logs_command
 ```
 
-ВМ создана, но приложение ещё нет: cloud-init только начал работу. Заходим и смотрим:
+Terraform отчитался `Apply complete`, но это значит только одно: **ресурсы облака созданы**. Приложения на ВМ ещё нет — cloud-init внутри ВМ только начал работу (ставит пакеты, клонирует репозиторий, скачивает образы). Зайдём на ВМ и посмотрим на это своими глазами.
+
+💻 Рабочая машина → заходим на ВМ по SSH (команда целиком есть в `terraform output ssh_command`):
 
 ```bash
 ssh root@$(terraform output -raw public_ip)
-cloud-init status --wait          # ждёт конца cloud-init (3–7 минут): status: done
-tail -f /var/log/start-app.log    # в соседнем окне — что происходит прямо сейчас
 ```
 
-Пока ждёте, найдите в логе: скачивание образов из `ghcr.io/…`, `git clone`, сборку бэкенда (`pip install`), `docker compose up`. Последняя строка — `готово: приложение на порту 80`.
+> `Connection refused` или `Connection timed out` в первую минуту после `apply` — ВМ ещё загружается. Подождите 30 секунд и повторите. Если спрашивает `Are you sure you want to continue connecting?` — ответьте `yes`.
+
+☁️ ВМ приложения (приглашение сменилось на `root@<prefix>-app:~#`):
+
+```bash
+cloud-init status --wait          # ждёт конца cloud-init (3–7 минут) и печатает status: done
+```
+
+Пока команда ждёт, откройте **второе окно терминала**, зайдите в нём на ВМ той же командой `ssh root@…` и следите за логом скрипта запуска:
+
+☁️ ВМ приложения, второе окно:
+
+```bash
+tail -f /var/log/start-app.log    # Ctrl+C, чтобы выйти
+```
+
+> `tail: cannot open '/var/log/start-app.log'` — две возможные причины. Либо вы запустили `tail` **на рабочей машине**, а не на ВМ (посмотрите на приглашение), либо cloud-init ещё ставит пакеты (`docker.io`, `git` — это первые 1–3 минуты) и до нашего скрипта не дошёл. Во втором случае подождите и повторите; что делает cloud-init прямо сейчас, покажет `journalctl -u cloud-final -f`.
+
+В логе найдите по порядку: установку Docker Compose, скачивание образов из `ghcr.io/…`, `git clone`, сборку бэкенда (`pip install`), `docker compose up`. Последняя строка — `готово: приложение на порту 80`.
+
+☁️ ВМ приложения — когда `cloud-init status --wait` напечатал `status: done`:
 
 ```bash
 cd /opt/devops-lab/lesson09
-docker compose ps                 # nginx, backend, db, cache — все Up, db и cache — healthy
-exit
+docker compose ps                 # nginx, backend, db, cache — все Up; db и cache — healthy
+exit                              # возвращаемся на рабочую машину
 ```
 
-> `Connection refused` или `timed out` при `ssh` в первую минуту — ВМ ещё загружается. Подождите и повторите.
-
 ### Часть 4. Приложение в интернете (5 мин)
+
+💻 Рабочая машина (каталог `lesson11/practice` — там state, из которого `terraform output` берёт адрес):
 
 ```bash
 curl $(terraform output -raw url)              # {"service":"backend","version":"lesson-11",…}
@@ -142,68 +187,78 @@ curl -X POST -H 'Content-Type: application/json' \
 
 ### Часть 5. Где живёт пароль (10 мин)
 
-`sensitive` скрывает значение **с экрана**. Проверим, где пароль на самом деле лежит.
+`sensitive = true` скрывает значение **с экрана** — и только. Проверим, где пароль на самом деле лежит.
 
-**1. Output.** Раскомментируйте в `outputs.tf` блок `output "db_password"` и выполните `terraform apply` (изменятся только outputs), затем:
+**1. Output.** 💻 Рабочая машина. Раскомментируйте в `outputs.tf` блок `output "db_password"` и выполните `terraform apply` (ресурсы не меняются, обновятся только outputs), затем:
 
 ```bash
 terraform output                      # db_password = <sensitive>  — значение скрыто
 terraform output -raw db_password     # а так пароль виден целиком
 ```
 
-Теперь удалите в этом блоке строку `sensitive = true` и запустите `terraform plan`. Terraform выдаст ошибку: output ссылается на переменную, помеченную как `sensitive`, поэтому сам output тоже обязан быть помечен `sensitive = true`. Верните строку на место.
+Теперь удалите в этом блоке строку `sensitive = true` и запустите `terraform plan`. Terraform выдаст ошибку `Output refers to sensitive values`: output ссылается на переменную, помеченную как `sensitive`, поэтому сам output тоже обязан быть помечен `sensitive = true`. Верните строку на место.
 
-**2. State.**
+**2. ВМ.** 💻 Рабочая машина → зайдите на ВМ: `ssh root@$(terraform output -raw public_ip)`. Затем:
 
-```bash
-grep -c "$TF_VAR_db_password" terraform.tfstate     # больше нуля — пароль в state открытым текстом
-```
-
-Найдите, в каком месте state он лежит (`grep -n`). Значения outputs хранятся в state открытым текстом, даже помеченные `sensitive`. Поэтому state — секретный файл: в Git его нельзя, а в команде доступ к нему — как к паролям.
-
-**3. ВМ.** Зайдите по SSH:
+☁️ ВМ приложения:
 
 ```bash
-cat /opt/app.env | grep PASSWORD
-curl -s http://169.254.169.254/openstack/latest/user_data | grep PASSWORD
+grep PASSWORD /opt/app.env                                                # файл, который записал cloud-init
+curl -s http://169.254.169.254/openstack/latest/user_data | grep PASSWORD  # а это — ответ облака
+exit
 ```
 
-Второй командой ВМ спрашивает у облака свои метаданные — тот самый `user_data`. Его может прочитать **любой процесс на ВМ**. Вывод: `user_data` — не сейф. Для учебного стенда это приемлемо, в бою секреты берут из хранилища секретов (Vault, Lockbox) при запуске.
+Первая команда показывает файл `.env`, который cloud-init записал на диск, — в нём пароль открытым текстом, иначе PostgreSQL его не получит.
+
+Вторая команда интереснее. `169.254.169.254` — это **сервис метаданных** облака: специальный адрес, одинаковый во всех облаках на базе OpenStack (и в AWS). Он доступен только изнутри ВМ и без всякой авторизации, а отвечает данными именно этой ВМ: имя, зона, SSH-ключи и наш `user_data` — весь текст cloud-init с подставленным паролем. Именно оттуда cloud-init и забрал его при первом запуске. Прочитать это может **любой процесс на ВМ**, в том числе любой контейнер в host-сети.
+
+Вывод: `sensitive = true` защищает только экран и логи Terraform. Сам пароль живёт в `user_data` и в файлах ВМ открытым текстом — `user_data` не сейф. Для учебного стенда это приемлемо; в бою ВМ при запуске сама забирает секреты из хранилища секретов (HashiCorp Vault, Secret Manager облака), а в cloud-init их не кладут.
 
 ### Часть 6. Две копии бэкенда (15 мин)
 
-На занятии 9 вы делали `docker compose up --scale backend=2`. Здесь это переменная `backend_count`. Сначала оставим след в базе:
+На занятии 9 вы делали `docker compose up --scale backend=2`. Здесь то же самое задаёт переменная `backend_count`. Сначала оставим след в базе, чтобы потом проверить, выживет ли он.
+
+💻 Рабочая машина:
 
 ```bash
 curl -X POST -H 'Content-Type: application/json' -d '{"text":"запись до изменений"}' $(terraform output -raw url)notes
 ```
 
-В `terraform.tfvars` поставьте `backend_count = 2` и **предскажите план**, потом проверьте:
+В `terraform.tfvars` поставьте `backend_count = 2`. Прежде чем запускать, **предскажите вдвоём**, что покажет план: пересоздание ВМ или изменение на месте? Потом проверьте.
+
+💻 Рабочая машина:
 
 ```bash
 terraform plan        # ~ sbercloud_compute_instance.app — update in-place, user_data (sensitive value)
 terraform apply
+# команда после ssh выполнится на ВМ и сразу вернёт вас обратно:
 ssh root@$(terraform output -raw public_ip) "cd /opt/devops-lab/lesson09 && docker compose ps backend"
 ```
 
-Копия бэкенда по-прежнему **одна**. Почему? Это уже было на занятии 10: провайдер записал новый `user_data` в работающую ВМ, но cloud-init выполняется только при **первом** запуске. Нужна новая ВМ:
+Копия бэкенда по-прежнему **одна**. Почему? Это уже было на занятии 10: провайдер записал новый `user_data` в метаданные работающей ВМ (`~` в плане), но cloud-init читает их и выполняет только при **первом** запуске ВМ. Чтобы новый `user_data` сработал, нужна новая ВМ:
+
+💻 Рабочая машина:
 
 ```bash
-terraform apply -replace=sbercloud_compute_instance.app     # -/+ ВМ, публичный IP тот же
+terraform apply -replace=sbercloud_compute_instance.app     # -/+ ВМ пересоздаётся; публичный IP — отдельный ресурс, он остаётся тем же
 ```
 
-Через 5–7 минут (снова `cloud-init status --wait`) проверьте:
+Снова ждём cloud-init 5–7 минут: `ssh root@$(terraform output -raw public_ip)`, на ВМ — `cloud-init status --wait`, `exit`. Если `ssh` ругается `REMOTE HOST IDENTIFICATION HAS CHANGED` — это новая ВМ на старом IP, выполните `ssh-keygen -R $(terraform output -raw public_ip)` и повторите.
+
+💻 Рабочая машина:
 
 ```bash
 for i in 1 2 3 4 5 6; do curl -s $(terraform output -raw url) | grep -o '"served_by":"[^"]*"'; done   # два разных served_by
 curl -s $(terraform output -raw url)notes          # а где «запись до изменений»?
 ```
 
-Записи нет: база жила на диске старой ВМ, и `-replace` удалил её вместе с ВМ. Вот почему в бою базу держат **отдельно** — на отдельной ВМ с отдельным диском или в управляемом сервисе облака — а ВМ приложения делают одноразовыми.
+Записи нет: PostgreSQL хранил данные на системном диске старой ВМ, и `-replace` удалил их вместе с ВМ. Вот почему в бою базу держат **отдельно** — на отдельной ВМ с отдельным диском или в управляемом сервисе облака — а ВМ приложения делают одноразовыми.
 
 ### Часть 7. Граница Terraform и уборка (15 мин)
 
-Зайдите на ВМ и «сломайте» приложение руками:
+«Сломаем» приложение руками, минуя Terraform.
+
+💻 Рабочая машина (первая команда выполнится на ВМ по ssh и вернёт вас обратно):
 
 ```bash
 ssh root@$(terraform output -raw public_ip) "cd /opt/devops-lab/lesson09 && docker compose stop backend"
@@ -217,10 +272,10 @@ terraform plan                                # No changes!
 - `ssh … docker compose start backend` — быстро, но руками;
 - `terraform apply -replace=…` — по коду, но новая ВМ и потеря данных.
 
-Уборка:
+Уборка — 💻 рабочая машина:
 
 ```bash
-terraform destroy
+terraform destroy          # введите yes; удалит ВМ, IP, ключ и группу безопасности
 terraform state list       # пусто
 ```
 
@@ -228,7 +283,7 @@ terraform state list       # пусто
 
 1. Добавьте переменную `app_version` и передайте её в шаблон вместо `lesson-11` в строке `APP_VERSION`. После `-replace` проверьте `curl $(terraform output -raw url)`.
 2. Выведите output `notes_url` — адрес страницы заметок.
-3. В `/var/log/start-app.log` найдите, сколько секунд заняли скачивание образов и сборка бэкенда. Что дольше и почему?
+3. На ВМ в `/var/log/start-app.log` найдите, сколько секунд заняли скачивание образов и сборка бэкенда. Что дольше и почему?
 
 ## Если что-то не работает
 
@@ -241,15 +296,17 @@ terraform state list       # пусто
 | `Output refers to sensitive values` | У output с паролем нет `sensitive = true` | Добавьте `sensitive = true` в блок output |
 | `Invalid value for variable` … `s7n.medium.2` | Задан другой тип ВМ | Оставьте `vm_flavor` по умолчанию |
 | `Quota exceeded` при apply | Кончились vCPU/ВМ в проекте — чьи-то ВМ не удалены | Сообщите преподавателю; проверьте, что ВМ занятия 10 удалена |
-| `cloud-init status` → `error` | Скрипт запуска упал | `tail -50 /var/log/start-app.log` — ищите последнюю ошибку |
-| В логе ошибка `docker pull ghcr.io/…` | Нет доступа к реестру | Повторите: `bash /opt/start-app.sh > /var/log/start-app.log 2>&1` |
-| `curl` → `Connection refused` после `status: done` | Стек не поднялся | `cd /opt/devops-lab/lesson09 && docker compose ps` и `docker compose logs backend` |
+| `tail: cannot open '/var/log/start-app.log'` | Вы на рабочей машине, а не на ВМ; или cloud-init ещё ставит пакеты | Проверьте приглашение (`root@<prefix>-app`); на ВМ подождите 1–2 минуты |
+| `ssh: connect … Connection refused/timed out` | ВМ ещё загружается; или ваш IP не входит в `allowed_ssh_cidr` | Подождите минуту; проверьте `allowed_ssh_cidr` в `terraform.tfvars` |
+| `cloud-init status` → `error` (на ВМ) | Скрипт запуска упал | `tail -50 /var/log/start-app.log` — ищите последнюю ошибку |
+| В логе ошибка `docker pull ghcr.io/…` (на ВМ) | Нет доступа к реестру | Повторите на ВМ: `bash /opt/start-app.sh > /var/log/start-app.log 2>&1` |
+| `curl` → `Connection refused` после `status: done` | Стек не поднялся | На ВМ: `cd /opt/devops-lab/lesson09 && docker compose ps` и `docker compose logs backend` |
 | `/health` → `postgres: error` | База ещё стартует | Подождите 10–20 секунд |
 | `REMOTE HOST IDENTIFICATION HAS CHANGED` после `-replace` | Новая ВМ на том же IP | `ssh-keygen -R <IP>` (как на занятии 10) |
 
 ## ⛔ Главное правило: ресурсы не оставляем
 
-ВМ и публичный IP стоят денег и занимают общую квоту, пока существуют. В конце занятия:
+ВМ и публичный IP стоят денег и занимают общую квоту, пока существуют. В конце занятия — 💻 на рабочей машине, в каталоге `lesson11/practice`:
 
 ```bash
 terraform destroy
@@ -269,7 +326,7 @@ terraform state list       # пусто
 3. **Output `notes_url`.** Добавьте output с адресом страницы заметок. Что показывает `plan` для него и почему?
 4. **Вопросы (письменно, коротко):**
    - Почему после `backend_count = 2` и `apply` копий бэкенда не прибавилось? Что сделал `-replace` и что при этом потерялось?
-   - Где в итоге хранится пароль базы: перечислите все места, которые нашли в части 5. Что из этого защищает `sensitive = true`, а что — нет?
+   - Где в итоге хранится пароль базы: перечислите все места, которые нашли в части 5 (output, файл на ВМ, метаданные ВМ). Что из этого защищает `sensitive = true`, а что — нет?
    - Почему после `docker compose stop backend` план пустой? Каким инструментом следят за тем, что запущено внутри ВМ?
    - Зачем зону выбирать по хэшу имени, а не брать первую из списка? Зачем `ignore_changes = [availability_zone, image_id]`?
 5. **Уборка:** приложите вывод `terraform state list` в папке `hw` — он должен быть **пустым** (вы делали только `plan`).
