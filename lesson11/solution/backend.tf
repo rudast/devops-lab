@@ -1,4 +1,4 @@
-# State занятия 11 — в PostgreSQL курса (см. README, часть 3).
+# State занятия 11 — в PostgreSQL курса (см. README, часть 7).
 #
 # State хранится в PostgreSQL курса (бэкенд "pg"). На время plan/apply Terraform ставит
 # блокировку: второй человек в тот же state получит «Error acquiring the state lock».
