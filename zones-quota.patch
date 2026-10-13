@@ -1,0 +1,372 @@
+From 246f60df7565d7edc4b39259bdbb55f7111db974 Mon Sep 17 00:00:00 2001
+From: Roman <tenroman1@gmail.com>
+Date: Tue, 13 Oct 2026 14:23:13 +0300
+Subject: [PATCH] =?UTF-8?q?=D0=97=D0=BE=D0=BD=D0=B0=20=D0=92=D0=9C=20?=
+ =?UTF-8?q?=D0=BF=D0=BE=20=D1=85=D1=8D=D1=88=D1=83=20=D0=B2=D0=BE=20=D0=B2?=
+ =?UTF-8?q?=D1=81=D0=B5=D1=85=20=D0=B7=D0=B0=D0=BD=D1=8F=D1=82=D0=B8=D1=8F?=
+ =?UTF-8?q?=D1=85;=20=D0=BA=D0=B2=D0=BE=D1=82=D1=8B=20=D0=BF=D1=80=D0=BE?=
+ =?UTF-8?q?=D0=B5=D0=BA=D1=82=D0=B0=2030=20=D0=92=D0=9C=20/=2030=20vCPU?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+Занятие 10: все ВМ шли в первую зону (names[0]) — в ней заканчивались машины
+типа s7n.medium.2, и это выглядело как квота 15. Теперь зона выбирается по хэшу
+префикса среди зон, где тип есть (как в занятиях 11–12).
+Тексты занятий 11–12: квоты проекта — 30 ВМ / 30 vCPU / 60 ГБ (подтверждено
+поддержкой), работаем в парах — половина квоты в запасе.
+
+Co-Authored-By: Claude Fable 5.1 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01CTEC2uSSyTp18GQYR1Bh3d
+---
+ lesson10/README.md             |  2 +-
+ lesson10/steps/01-data.tf      | 39 ++++++++++++++++++++++------------
+ lesson10/steps/04-vm.tf        |  2 +-
+ lesson10/terraform/main.tf     | 17 ++++++++++-----
+ lesson10/terraform/outputs.tf  | 12 +++++------
+ lesson11/README.md             | 10 ++++-----
+ lesson11/practice/main.tf      |  2 +-
+ lesson11/practice/variables.tf |  4 ++--
+ lesson11/solution/variables.tf |  4 ++--
+ lesson12/README.md             |  4 ++--
+ lesson12/practice/main.tf      |  2 +-
+ lesson12/practice/variables.tf |  4 ++--
+ lesson12/solution/variables.tf |  4 ++--
+ 13 files changed, 62 insertions(+), 44 deletions(-)
+
+diff --git a/lesson10/README.md b/lesson10/README.md
+index c1c196f..cfbdb15 100644
+--- a/lesson10/README.md
++++ b/lesson10/README.md
+@@ -237,7 +237,7 @@ terraform destroy                  # в конце занятия — обяза
+ 1. **Короткое имя для SSH.** Добавьте в `~/.ssh/config` блок `Host hse-vm` с `HostName <IP>`, `User root` и `IdentityFile ~/.ssh/id_ed25519`. После этого вход выполняется командой `ssh hse-vm`.
+ 2. **Диск.** По умолчанию диск минимальный для образа (output `disk_min_gb`). Поставьте `vm_disk_size` на 10 ГБ больше → `plan` покажет изменение на месте (`~`). После `apply` проверьте `df -h /` на ВМ. Потом попробуйте вернуть прежнее значение и прочитайте ошибку: уменьшать диск нельзя.
+ 3. **Пустите соседа.** Добавьте его публичный ключ в `~/.ssh/authorized_keys` на своей ВМ и проверьте, что он может войти. Затем обсудите: увидит ли это изменение `terraform plan`? Почему нет? Что станет с этим ключом после пересоздания ВМ?
+-4. **`terraform console`.** Посчитайте в нём `cidrhost("192.168.8.0/22", 10)`, `upper(var.prefix)`, `data.sbercloud_compute_flavors.vm.ids`.
++4. **`terraform console`.** Посчитайте в нём `cidrhost("192.168.8.0/22", 10)`, `upper(var.prefix)`, `local.zones_with_flavor`.
+ 
+ ## Если что-то не работает
+ 
+diff --git a/lesson10/steps/01-data.tf b/lesson10/steps/01-data.tf
+index 67e468b..cd2863b 100644
+--- a/lesson10/steps/01-data.tf
++++ b/lesson10/steps/01-data.tf
+@@ -5,6 +5,25 @@
+ # Зоны доступности региона
+ data "sbercloud_availability_zones" "zones" {}
+ 
++# Типы ВМ в КАЖДОЙ зоне: в одной зоне нужный тип может закончиться, тогда apply упадёт.
++# for_each — по одной копии data-источника на зону.
++data "sbercloud_compute_flavors" "by_zone" {
++  for_each          = toset(data.sbercloud_availability_zones.zones.names)
++  availability_zone = each.key
++  cpu_core_count    = var.vm_cpu
++  memory_size       = var.vm_ram
++}
++
++locals {
++  # Зоны, где наш тип ВМ сейчас есть
++  zones_with_flavor = sort([for z, f in data.sbercloud_compute_flavors.by_zone : z if contains(f.ids, var.vm_flavor)])
++
++  # «Случайная», но стабильная зона — по хэшу префикса: у разных людей разные зоны,
++  # у одного человека всегда одна и та же (иначе ВМ пересоздавалась бы при каждом plan).
++  zone_index = parseint(substr(md5(var.prefix), 0, 6), 16)
++  zone       = length(local.zones_with_flavor) > 0 ? local.zones_with_flavor[local.zone_index % length(local.zones_with_flavor)] : null
++}
++
+ # Свежий публичный образ Ubuntu
+ data "sbercloud_images_image" "ubuntu" {
+   name_regex  = var.image_name_regex
+@@ -12,21 +31,18 @@ data "sbercloud_images_image" "ubuntu" {
+   most_recent = true
+ }
+ 
+-# Тип ВМ (flavor) с нужным числом vCPU и памяти
+-# (список всех типов с таким же числом vCPU и памяти в зоне — чтобы проверить, что наш тип там есть)
+-data "sbercloud_compute_flavors" "vm" {
+-  availability_zone = data.sbercloud_availability_zones.zones.names[0]
+-  cpu_core_count    = var.vm_cpu
+-  memory_size       = var.vm_ram
+-}
+-
+ # Общая подсеть курса — её создал преподаватель (lesson10/shared). Ищем по имени
+ data "sbercloud_vpc_subnet" "course" {
+   name = var.subnet_name
+ }
+ 
+ output "zone" {
+-  value = data.sbercloud_availability_zones.zones.names[0]
++  value = local.zone
++
++  precondition {
++    condition     = local.zone != null
++    error_message = "Типа ВМ ${var.vm_flavor} сейчас нет ни в одной зоне региона. Доступные типы ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ по зонам: ${join("; ", [for z, f in data.sbercloud_compute_flavors.by_zone : "${z}: ${join(", ", f.ids)}"])}"
++  }
+ }
+ 
+ output "image" {
+@@ -40,11 +56,6 @@ output "disk_min_gb" {
+ 
+ output "flavor" {
+   value = var.vm_flavor
+-
+-  precondition {
+-    condition     = contains(data.sbercloud_compute_flavors.vm.ids, var.vm_flavor)
+-    error_message = "Типа ВМ ${var.vm_flavor} нет в зоне ${data.sbercloud_availability_zones.zones.names[0]}. Доступны ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ: ${join(", ", data.sbercloud_compute_flavors.vm.ids)}"
+-  }
+ }
+ 
+ output "subnet" {
+diff --git a/lesson10/steps/04-vm.tf b/lesson10/steps/04-vm.tf
+index e910936..c43563f 100644
+--- a/lesson10/steps/04-vm.tf
++++ b/lesson10/steps/04-vm.tf
+@@ -9,7 +9,7 @@ resource "sbercloud_compute_instance" "vm" {
+   name               = "${var.prefix}-vm"
+   image_id           = data.sbercloud_images_image.ubuntu.id
+   flavor_id          = var.vm_flavor
+-  availability_zone  = data.sbercloud_availability_zones.zones.names[0]
++  availability_zone  = local.zone # зона из шага 1: та, где есть наш тип ВМ
+   security_group_ids = [sbercloud_networking_secgroup.vm.id]
+   key_pair           = TODO_KEY
+ 
+diff --git a/lesson10/terraform/main.tf b/lesson10/terraform/main.tf
+index 405913a..e38aa61 100644
+--- a/lesson10/terraform/main.tf
++++ b/lesson10/terraform/main.tf
+@@ -10,14 +10,21 @@ data "sbercloud_images_image" "ubuntu" {
+   most_recent = true
+ }
+ 
+-# Тип ВМ (flavor) с нужным числом vCPU и памяти
+-# (список всех типов с таким же числом vCPU и памяти в зоне — чтобы проверить, что наш тип там есть)
+-data "sbercloud_compute_flavors" "vm" {
+-  availability_zone = data.sbercloud_availability_zones.zones.names[0]
++# Типы ВМ в КАЖДОЙ зоне: в одной зоне нужный тип может закончиться, тогда apply упадёт
++data "sbercloud_compute_flavors" "by_zone" {
++  for_each          = toset(data.sbercloud_availability_zones.zones.names)
++  availability_zone = each.key
+   cpu_core_count    = var.vm_cpu
+   memory_size       = var.vm_ram
+ }
+ 
++locals {
++  # Зоны, где наш тип ВМ сейчас есть, и «случайная», но стабильная зона — по хэшу префикса
++  zones_with_flavor = sort([for z, f in data.sbercloud_compute_flavors.by_zone : z if contains(f.ids, var.vm_flavor)])
++  zone_index        = parseint(substr(md5(var.prefix), 0, 6), 16)
++  zone              = length(local.zones_with_flavor) > 0 ? local.zones_with_flavor[local.zone_index % length(local.zones_with_flavor)] : null
++}
++
+ # Общая подсеть курса — её создал преподаватель (lesson10/shared). Ищем по имени
+ data "sbercloud_vpc_subnet" "course" {
+   name = var.subnet_name
+@@ -61,7 +68,7 @@ resource "sbercloud_compute_instance" "vm" {
+   name               = "${var.prefix}-vm"
+   image_id           = data.sbercloud_images_image.ubuntu.id
+   flavor_id          = var.vm_flavor
+-  availability_zone  = data.sbercloud_availability_zones.zones.names[0]
++  availability_zone  = local.zone
+   security_group_ids = [sbercloud_networking_secgroup.vm.id]
+   key_pair           = sbercloud_kps_keypair.key.name
+ 
+diff --git a/lesson10/terraform/outputs.tf b/lesson10/terraform/outputs.tf
+index 77f1a02..523422c 100644
+--- a/lesson10/terraform/outputs.tf
++++ b/lesson10/terraform/outputs.tf
+@@ -1,5 +1,10 @@
+ output "zone" {
+-  value = data.sbercloud_availability_zones.zones.names[0]
++  value = local.zone
++
++  precondition {
++    condition     = local.zone != null
++    error_message = "Типа ВМ ${var.vm_flavor} сейчас нет ни в одной зоне региона. Доступные типы ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ по зонам: ${join("; ", [for z, f in data.sbercloud_compute_flavors.by_zone : "${z}: ${join(", ", f.ids)}"])}"
++  }
+ }
+ 
+ output "image" {
+@@ -8,11 +13,6 @@ output "image" {
+ 
+ output "flavor" {
+   value = var.vm_flavor
+-
+-  precondition {
+-    condition     = contains(data.sbercloud_compute_flavors.vm.ids, var.vm_flavor)
+-    error_message = "Типа ВМ ${var.vm_flavor} нет в зоне ${data.sbercloud_availability_zones.zones.names[0]}. Доступны ${var.vm_cpu} vCPU / ${var.vm_ram} ГБ: ${join(", ", data.sbercloud_compute_flavors.vm.ids)}"
+-  }
+ }
+ 
+ output "subnet" {
+diff --git a/lesson11/README.md b/lesson11/README.md
+index 4c215b9..54ef7ea 100644
+--- a/lesson11/README.md
++++ b/lesson11/README.md
+@@ -21,14 +21,14 @@ http://<публичный IP>/  →  nginx:80  →  backend ×N  →  PostgreSQ
+ | cloud-init ставит nginx | cloud-init поднимает весь стек занятия 9 через Docker Compose |
+ | `templatefile` с одной переменной | `templatefile` с пятью: имя, репозиторий, реестр, пароль, число копий бэкенда |
+ | паролей нет | пароль базы — через `TF_VAR_db_password` и `sensitive = true` |
+-| зона — первая в списке | зона — по хэшу имени, только там, где есть нужный тип ВМ |
++| зона — первая в списке у всех (в ней кончались машины нужного типа) | зона — по хэшу имени, только там, где нужный тип ВМ есть |
+ | по ВМ на каждого | **одна ВМ на пару** — квота общая |
+ 
+ ## Квоты: почему работаем в парах
+ 
+-В общем проекте лимит — **15 ВМ, 30 vCPU, 60 ГБ RAM, 1200 ГБ диска** на всю группу (30 человек). Поэтому:
++В общем проекте лимит — **30 ВМ, 30 vCPU, 60 ГБ RAM, 1200 ГБ диска** на всю группу (30 человек). По одной минимальной ВМ на каждого хватило бы ровно впритык: ни запаса на ВМ преподавателя, ни на чью-то забытую машину, ни на `-replace`. Поэтому:
+ 
+-- работаем **командами по 2** (если нечётно — по 3): одна ВМ на команду, 14 команд + ВМ преподавателя = 15;
++- работаем **командами по 2** (если нечётно — по 3): одна ВМ на команду, 14 команд + ВМ преподавателя = 15 из 30 — половина квоты в запасе;
+ - тип ВМ — только минимальный **s7n.medium.2** (1 vCPU / 2 ГБ), это проверяет `validation` в `variables.tf`;
+ - диск — минимум образа;
+ - зону код выбирает сам — см. `locals` в `main.tf`: зоны, где наш тип ВМ есть, и одна из них по хэшу имени ВМ. ВМ команд расходятся по разным зонам.
+@@ -240,7 +240,7 @@ terraform state list       # пусто
+ | `Invalid template interpolation value` / `vars map does not contain key` | В карте `templatefile` нет переменной, которая есть в шаблоне | Сверьте пять подстановок `${…}` с картой |
+ | `Output refers to sensitive values` | У выхода с паролем нет `sensitive = true` | Верните `sensitive = true` |
+ | `Invalid value for variable` … `s7n.medium.2` | Задан другой тип ВМ | Оставьте `vm_flavor` по умолчанию |
+-| `Quota exceeded` при apply | В проекте уже 15 ВМ | Сообщите преподавателю; проверьте, что ВМ занятия 10 удалена |
++| `Quota exceeded` при apply | Кончились vCPU/ВМ в проекте — чьи-то ВМ не удалены | Сообщите преподавателю; проверьте, что ВМ занятия 10 удалена |
+ | `cloud-init status` → `error` | Скрипт запуска упал | `tail -50 /var/log/start-app.log` — ищите последнюю ошибку |
+ | В логе ошибка `docker pull ghcr.io/…` | Нет доступа к реестру | Повторите: `bash /opt/start-app.sh > /var/log/start-app.log 2>&1` |
+ | `curl` → `Connection refused` после `status: done` | Стек не поднялся | `cd /opt/devops-lab/lesson09 && docker compose ps` и `docker compose logs backend` |
+@@ -260,7 +260,7 @@ terraform state list       # пусто
+ 
+ **Срок — до занятия 12.** Как сдавать: заполните шаблон [HOMEWORK.md](HOMEWORK.md) (скопируйте, назовите `ДЗ-11-фамилия.md`) и отправьте файлом в чат группы. ДЗ — **индивидуальное**.
+ 
+-> **ДЗ делается без `apply`** — только `terraform plan`. Квота общая: 30 человек дома одновременно не поместятся в 15 ВМ. `plan` ничего не создаёт и квоту не тратит.
++> **ДЗ делается без `apply`** — только `terraform plan`. Квота общая: 30 ВМ на всю группу, и дома каждый `apply` отнимает место у занятия. `plan` ничего не создаёт и квоту не тратит.
+ 
+ Работайте в копии: `cp -r solution hw && cd hw && rm -rf .terraform terraform.tfstate*`. В `terraform.tfvars` — префикс **`<фамилия>-hw`**. Пароль: `export TF_VAR_db_password="$(openssl rand -hex 12)"`.
+ 
+diff --git a/lesson11/practice/main.tf b/lesson11/practice/main.tf
+index cb202d5..0befdfa 100644
+--- a/lesson11/practice/main.tf
++++ b/lesson11/practice/main.tf
+@@ -1,4 +1,4 @@
+-# Занятие 11. Работаем В ПАРЕ: одна ВМ на команду (квота проекта — 15 ВМ на всю группу).
++# Занятие 11. Работаем В ПАРЕ: одна ВМ на команду (квота проекта — 30 vCPU на всю группу, запас нужен).
+ # На ВМ — стек занятия 9: на ней стек занятия 9
+ # (nginx → backend → PostgreSQL + Redis), который поднимает cloud-init при первом запуске.
+ # Порядок работы — в README, части 1–7.
+diff --git a/lesson11/practice/variables.tf b/lesson11/practice/variables.tf
+index 6783e41..5ba87e3 100644
+--- a/lesson11/practice/variables.tf
++++ b/lesson11/practice/variables.tf
+@@ -26,7 +26,7 @@ variable "image_name_regex" {
+   default     = "^Ubuntu 22.04 server 64bit$"
+ }
+ 
+-# ---------- Квоты курса: 15 ВМ, 30 vCPU, 60 ГБ RAM на всю группу ----------
++# ---------- Квоты курса: 30 ВМ, 30 vCPU, 60 ГБ RAM на всю группу — ровно по 1 vCPU на человека ----------
+ variable "vm_flavor" {
+   description = "Тип ВМ. В курсе разрешён только минимальный: s7n.medium.2 (1 vCPU / 2 ГБ)"
+   type        = string
+@@ -34,7 +34,7 @@ variable "vm_flavor" {
+ 
+   validation {
+     condition     = contains(["s7n.medium.2"], var.vm_flavor)
+-    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ) — иначе не хватит квоты на всех."
++    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ): квота — 30 vCPU на всю группу."
+   }
+ }
+ 
+diff --git a/lesson11/solution/variables.tf b/lesson11/solution/variables.tf
+index 8027aa6..d7d8a00 100644
+--- a/lesson11/solution/variables.tf
++++ b/lesson11/solution/variables.tf
+@@ -26,7 +26,7 @@ variable "image_name_regex" {
+   default     = "^Ubuntu 22.04 server 64bit$"
+ }
+ 
+-# ---------- Квоты курса: 15 ВМ, 30 vCPU, 60 ГБ RAM на всю группу ----------
++# ---------- Квоты курса: 30 ВМ, 30 vCPU, 60 ГБ RAM на всю группу — ровно по 1 vCPU на человека ----------
+ variable "vm_flavor" {
+   description = "Тип ВМ. В курсе разрешён только минимальный: s7n.medium.2 (1 vCPU / 2 ГБ)"
+   type        = string
+@@ -34,7 +34,7 @@ variable "vm_flavor" {
+ 
+   validation {
+     condition     = contains(["s7n.medium.2"], var.vm_flavor)
+-    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ) — иначе не хватит квоты на всех."
++    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ): квота — 30 vCPU на всю группу."
+   }
+ }
+ 
+diff --git a/lesson12/README.md b/lesson12/README.md
+index c509836..14f63c7 100644
+--- a/lesson12/README.md
++++ b/lesson12/README.md
+@@ -16,7 +16,7 @@
+ 
+ ## Квоты: снова в парах
+ 
+-Лимиты проекта те же: **15 ВМ на 30 человек**. Работаем командами по 2 (если нечётно — по 3), одна ВМ на команду, префикс — две фамилии: `ivanov-petrov`. Тип ВМ, диск и зона выбираются кодом, как на занятии 11.
++Лимиты проекта те же: **30 ВМ и 30 vCPU на 30 человек** — впритык, без запаса. Работаем командами по 2 (если нечётно — по 3), одна ВМ на команду, префикс — две фамилии: `ivanov-petrov`. Тип ВМ, диск и зона выбираются кодом, как на занятии 11.
+ 
+ ## Подготовка
+ 
+@@ -226,7 +226,7 @@ terraform destroy
+ | `apply` после `state rm`: ключ уже существует | Пропустили импорт | Блок `import` из части 4 |
+ | `Instance cannot be destroyed` | `prevent_destroy` | Так задумано: уберите строку осознанно |
+ | `Missing resource instance key` | После `count` ссылка без `[0]` | `sbercloud_vpc_eip.ip[0].address` |
+-| `Quota exceeded` при apply | В проекте уже 15 ВМ | Сообщите преподавателю; проверьте, что ВМ занятия 11 удалена |
++| `Quota exceeded` при apply | Кончились vCPU/ВМ в проекте — чьи-то ВМ не удалены | Сообщите преподавателю; проверьте, что ВМ занятия 11 удалена |
+ 
+ ## ⛔ Главное правило: ресурсы не оставляем
+ 
+diff --git a/lesson12/practice/main.tf b/lesson12/practice/main.tf
+index 2fa75e7..6103e25 100644
+--- a/lesson12/practice/main.tf
++++ b/lesson12/practice/main.tf
+@@ -1,4 +1,4 @@
+-# Занятие 12. Работаем В ПАРЕ: одна ВМ на команду. Инфраструктура та же, что на занятии 11.
++# Занятие 12. Работаем В ПАРЕ: одна ВМ на команду (квота — 30 vCPU на всю группу). Инфраструктура та же, что на занятии 11.
+ # Порядок работы — в README, части 1–7. Код специально слегка «помят» — часть 1 начинается с terraform fmt.
+ 
+ # ---------- Data sources: читаем облако ----------
+diff --git a/lesson12/practice/variables.tf b/lesson12/practice/variables.tf
+index d032984..d9e395d 100644
+--- a/lesson12/practice/variables.tf
++++ b/lesson12/practice/variables.tf
+@@ -26,7 +26,7 @@ variable "image_name_regex" {
+   default     = "^Ubuntu 22.04 server 64bit$"
+ }
+ 
+-# ---------- Квоты курса: 15 ВМ, 30 vCPU, 60 ГБ RAM на всю группу ----------
++# ---------- Квоты курса: 30 ВМ, 30 vCPU, 60 ГБ RAM на всю группу — ровно по 1 vCPU на человека ----------
+ variable "vm_flavor" {
+   description = "Тип ВМ. В курсе разрешён только минимальный: s7n.medium.2 (1 vCPU / 2 ГБ)"
+   type        = string
+@@ -34,7 +34,7 @@ variable "vm_flavor" {
+ 
+   validation {
+     condition     = contains(["s7n.medium.2"], var.vm_flavor)
+-    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ) — иначе не хватит квоты на всех."
++    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ): квота — 30 vCPU на всю группу."
+   }
+ }
+ 
+diff --git a/lesson12/solution/variables.tf b/lesson12/solution/variables.tf
+index 7f081b2..897521a 100644
+--- a/lesson12/solution/variables.tf
++++ b/lesson12/solution/variables.tf
+@@ -26,7 +26,7 @@ variable "image_name_regex" {
+   default     = "^Ubuntu 22.04 server 64bit$"
+ }
+ 
+-# ---------- Квоты курса: 15 ВМ, 30 vCPU, 60 ГБ RAM на всю группу ----------
++# ---------- Квоты курса: 30 ВМ, 30 vCPU, 60 ГБ RAM на всю группу — ровно по 1 vCPU на человека ----------
+ variable "vm_flavor" {
+   description = "Тип ВМ. В курсе разрешён только минимальный: s7n.medium.2 (1 vCPU / 2 ГБ)"
+   type        = string
+@@ -34,7 +34,7 @@ variable "vm_flavor" {
+ 
+   validation {
+     condition     = contains(["s7n.medium.2"], var.vm_flavor)
+-    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ) — иначе не хватит квоты на всех."
++    error_message = "В общем проекте курса разрешён только тип s7n.medium.2 (1 vCPU / 2 ГБ): квота — 30 vCPU на всю группу."
+   }
+ }
+ 
+-- 
+2.43.0
+
